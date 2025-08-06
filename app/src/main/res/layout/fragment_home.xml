@@ -1,0 +1,440 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:card_view="http://schemas.android.com/tools"
+    android:id="@+id/scrollView"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/white">
+
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        >
+        <!-- Header -->
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="275dp"
+            android:id="@+id/layout_heading"
+            android:background="@drawable/bg_blue_rounded_bottom">
+
+            <TextView
+                android:id="@+id/tvGreeting"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Hello, John!"
+                android:textSize="24sp"
+                android:textStyle="bold"
+                android:textColor="@android:color/white"
+                android:layout_marginStart="20dp"
+                android:layout_marginTop="30dp" />
+
+            <TextView
+                android:id="@+id/tvSubGreeting"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Ready to scan some documents?"
+                android:textColor="@android:color/white"
+                android:textSize="14sp"
+                android:layout_below="@id/tvGreeting"
+                android:layout_marginStart="20dp"
+                android:layout_marginTop="4dp" />
+
+
+            <ImageView
+                android:id="@+id/profileImage"
+                android:layout_width="50dp"
+                android:layout_height="50dp"
+                android:layout_alignParentEnd="true"
+                android:layout_marginTop="33dp"
+                android:layout_marginEnd="29dp"
+                android:scaleType="centerCrop"
+                android:src="@drawable/ic_profile" />
+
+            <LinearLayout
+                android:layout_margin="16dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/card_white_shadow"
+                android:padding="30dp"
+                android:layout_below="@id/tvSubGreeting"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:id="@+id/layout_capture"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Scan Document"
+                        android:textColor="@android:color/black"
+                        android:textSize="23sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Capture and convert instantly"
+                        android:textColor="#888888"
+                        android:textSize="15sp" />
+                </LinearLayout>
+
+
+                <ImageButton
+                    android:layout_width="70dp"
+                    android:layout_height="70dp"
+                    android:id="@+id/iv_scan"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:focusableInTouchMode="true"
+                    android:background="@drawable/round_button"
+                    android:scaleType="centerInside"
+                    android:src="@drawable/ic_camera"
+                    app:tint="@android:color/white" />
+            </LinearLayout>
+
+        </RelativeLayout>
+<!--cards-->
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:id="@+id/cards"
+            android:layout_below="@id/layout_heading"
+            android:layout_marginTop="10dp"
+            android:layout_margin="10dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center_horizontal"
+                    android:layout_gravity="center_horizontal">
+
+                    <!-- First Row -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center"
+                        android:weightSum="3">
+
+                        <!-- Upload -->
+                        <androidx.cardview.widget.CardView
+                            xmlns:card_view="http://schemas.android.com/apk/res-auto"
+                            android:layout_width="0dp"
+                            android:layout_height="160dp"
+                            android:layout_margin="8dp"
+                            android:layout_weight="1"
+                            card_view:cardCornerRadius="24dp"
+                            card_view:cardElevation="6dp"
+                            card_view:cardPreventCornerOverlap="false"
+                            android:backgroundTint="#EAF9F3">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:orientation="vertical"
+                                android:gravity="center">
+
+                                <ImageView
+                                    android:layout_width="36dp"
+                                    android:layout_height="36dp"
+                                    android:src="@drawable/ic_upload"
+                                    android:contentDescription="Upload"
+                                    app:tint="#00B273" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="12dp"
+                                    android:text="Upload"
+                                    android:textStyle="bold"
+                                    android:textSize="16sp"
+                                    android:textColor="#000" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="From gallery"
+                                    android:textColor="#888"
+                                    android:textSize="14sp" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="8dp"
+                                    android:id="@+id/tv_select_upload"
+                                    android:text="Select"
+                                    style="@style/OptionTextView"
+                                    android:textStyle="bold"
+                                    android:textColor="#000" />
+                            </LinearLayout>
+                        </androidx.cardview.widget.CardView>
+
+                        <!-- Translate -->
+                        <androidx.cardview.widget.CardView
+                            xmlns:card_view="http://schemas.android.com/apk/res-auto"
+                            android:layout_width="0dp"
+                            android:layout_height="160dp"
+                            android:layout_margin="8dp"
+                            android:layout_weight="1"
+                            card_view:cardCornerRadius="24dp"
+                            card_view:cardElevation="6dp"
+                            card_view:cardPreventCornerOverlap="false"
+                            android:backgroundTint="#EEF1FE">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:orientation="vertical"
+                                android:gravity="center">
+
+                                <ImageView
+                                    android:layout_width="36dp"
+                                    android:layout_height="36dp"
+                                    android:src="@drawable/ic_translate"
+                                    android:contentDescription="Translate"
+                                    app:tint="#3F54F4" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="12dp"
+                                    android:text="Translate"
+                                    android:textStyle="bold"
+                                    android:textSize="16sp"
+                                    android:textColor="#000" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Any language"
+                                    android:textColor="#888"
+                                    android:textSize="14sp" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="8dp"
+                                    android:id="@+id/tv_start_translate"
+                                    android:text="Start"
+                                    style="@style/OptionTextView"
+                                    android:textStyle="bold"
+                                    android:textColor="#000" />
+                            </LinearLayout>
+                        </androidx.cardview.widget.CardView>
+
+                        <!-- Files -->
+                        <androidx.cardview.widget.CardView
+                            xmlns:card_view="http://schemas.android.com/apk/res-auto"
+                            android:layout_width="0dp"
+                            android:layout_height="160dp"
+                            android:layout_margin="8dp"
+                            android:layout_weight="1"
+                            card_view:cardCornerRadius="24dp"
+                            card_view:cardElevation="6dp"
+                            card_view:cardPreventCornerOverlap="false"
+                            android:backgroundTint="#F4F8FB">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:orientation="vertical"
+                                android:gravity="center">
+
+                                <ImageView
+                                    android:layout_width="36dp"
+                                    android:layout_height="36dp"
+                                    android:src="@drawable/ic_files2"
+                                    android:contentDescription="Files"
+                                    app:tint="#2B3F73" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="12dp"
+                                    android:text="Files"
+                                    android:textStyle="bold"
+                                    android:textSize="16sp"
+                                    android:textColor="#000" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="6 docs"
+                                    android:textColor="#888"
+                                    android:textSize="14sp" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="8dp"
+                                    android:id="@+id/tv_view_files"
+                                    android:text="View"
+                                    style="@style/OptionTextView"
+                                    android:textStyle="bold"
+                                    android:textColor="#000" />
+                            </LinearLayout>
+                        </androidx.cardview.widget.CardView>
+                    </LinearLayout>
+
+                    <!-- Second Row -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginTop="16dp"
+                        android:gravity="center"
+                        android:weightSum="2">
+
+                        <!-- Documents Scanned -->
+                        <androidx.cardview.widget.CardView
+                            xmlns:card_view="http://schemas.android.com/apk/res-auto"
+                            android:layout_width="0dp"
+                            android:layout_height="100dp"
+                            android:layout_margin="8dp"
+                            android:layout_weight="1"
+                            card_view:cardCornerRadius="24dp"
+                            card_view:cardElevation="6dp"
+                            card_view:cardPreventCornerOverlap="false"
+                            android:backgroundTint="#F4F8FB">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:orientation="horizontal"
+                                android:gravity="center_vertical"
+                                android:padding="16dp">
+
+                                <ImageView
+                                    android:layout_width="32dp"
+                                    android:layout_height="32dp"
+                                    android:src="@drawable/ic_scanned_files"
+                                    android:layout_marginEnd="12dp"
+                                    app:tint="#3F54F4" />
+
+                                <LinearLayout
+                                    android:orientation="vertical"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="47"
+                                        android:textSize="20sp"
+                                        android:textStyle="bold"
+                                        android:textColor="#000" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="Documents scanned"
+                                        android:textSize="14sp"
+                                        android:textColor="#888" />
+                                </LinearLayout>
+                            </LinearLayout>
+                        </androidx.cardview.widget.CardView>
+
+                        <!-- Storage Used -->
+                        <androidx.cardview.widget.CardView
+                            xmlns:card_view="http://schemas.android.com/apk/res-auto"
+                            android:layout_width="0dp"
+                            android:layout_height="100dp"
+                            android:layout_margin="8dp"
+                            android:layout_weight="1"
+                            card_view:cardCornerRadius="24dp"
+                            card_view:cardElevation="6dp"
+                            card_view:cardPreventCornerOverlap="false"
+                            android:backgroundTint="#F4F8FB">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:orientation="horizontal"
+                                android:gravity="center_vertical"
+                                android:padding="16dp">
+
+                                <ImageView
+                                    android:layout_width="32dp"
+                                    android:layout_height="32dp"
+                                    android:src="@drawable/ic_cloud_store"
+                                    android:layout_marginEnd="12dp"
+                                    app:tint="#00B273" />
+
+                                <LinearLayout
+                                    android:orientation="vertical"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="2.3 GB"
+                                        android:textSize="20sp"
+                                        android:textStyle="bold"
+                                        android:textColor="#000" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="Storage used"
+                                        android:textSize="14sp"
+                                        android:textColor="#888" />
+                                </LinearLayout>
+                            </LinearLayout>
+                        </androidx.cardview.widget.CardView>
+                    </LinearLayout>
+
+                </LinearLayout>
+
+        </RelativeLayout>
+
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:id="@+id/recycler_card"
+            android:layout_below="@id/cards"
+            android:layout_margin="10dp">
+
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Recent Files"
+                android:id="@+id/tv_recent_files"
+                android:textColor="@android:color/black"
+                android:textSize="17sp"
+                android:layout_marginLeft="10dp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="View All"
+                android:id="@+id/tv_view_all_files"
+                android:textColor="@android:color/black"
+                android:textSize="17sp"
+                android:layout_marginRight="10dp"
+                android:layout_alignParentEnd="true"
+                android:layout_marginLeft="10dp"
+                android:textStyle="bold" />
+
+
+            <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recentFilesRecycler"
+            android:layout_marginTop="5dp"
+            android:layout_below="@id/tv_recent_files"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="16dp"
+            />
+
+        </RelativeLayout>
+    </RelativeLayout>
+</ScrollView>

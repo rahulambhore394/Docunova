@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:card_view="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginVertical="8dp"
+    card_view:cardCornerRadius="24dp"
+    card_view:cardElevation="4dp"
+    android:foreground="?android:attr/selectableItemBackground">
+
+    <LinearLayout
+        android:id="@+id/container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="16dp"
+        android:gravity="center_vertical"
+        android:background="@drawable/file_item_selector">
+
+        <!-- Thumbnail -->
+        <ImageView
+            android:id="@+id/imageThumbnail2"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:scaleType="centerCrop"
+            android:src="@drawable/app_icon"
+            android:layout_marginEnd="12dp"
+            android:background="@drawable/image_rounded_bg"
+            android:clipToOutline="true" />
+
+        <!-- Text Info -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/fileTitle2"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Business Contract"
+                android:textColor="#000000"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/fileMeta2"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="2024-01-15 • 2.4 MB"
+                android:textColor="#777777"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <!-- File Type + Download -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="4dp">
+
+            <!-- File Type Badge -->
+            <TextView
+                android:id="@+id/fileType"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="PDF"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="4dp"
+                android:textSize="12sp"
+                android:textColor="#3F54F4"
+                android:background="@drawable/file_type_badge"
+                android:layout_marginEnd="8dp" />
+
+            <!-- Download Icon -->
+            <ImageView
+                android:id="@+id/downloadIcon"
+                android:layout_width="27dp"
+                android:layout_height="27dp"
+                android:src="@drawable/ic_downlaod"
+                card_view:tint="#3F54F4" />
+        </LinearLayout>
+    </LinearLayout>
+</androidx.cardview.widget.CardView>

@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:padding="16dp"
+    android:background="@android:color/white">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- Language Selection -->
+
+
+        <!-- Document Name -->
+        <EditText
+            android:id="@+id/editTextDocumentName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Document Name: MyDocument.pdf"
+            android:enabled="false"
+            android:background="@drawable/bg_edittext"
+            android:padding="12dp"
+            android:textColor="@android:color/black"
+            android:textSize="16sp"
+            android:layout_marginTop="12dp" />
+        <ProgressBar
+            android:id="@+id/progressBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:visibility="gone"
+            android:layout_marginBottom="8dp"/>
+
+        <TextView
+            android:id="@+id/progressText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textAlignment="center"
+            android:visibility="gone"
+            android:textColor="#666666"
+            android:textSize="14sp"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- Convert Options -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Convert Options"
+            android:textStyle="bold"
+            android:textSize="14sp"
+            android:textColor="#444444"
+            android:paddingTop="16dp"
+            android:paddingBottom="8dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:weightSum="2"
+            android:gravity="center"
+            android:layout_marginBottom="16dp">
+
+            <Button
+                android:id="@+id/btnConvertToPDF"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Convert to PDF"
+                android:drawableStart="@drawable/ic_pdf"
+                android:backgroundTint="#0C51D4"
+                android:textColor="@android:color/white"
+                android:layout_marginEnd="8dp" />
+
+            <Button
+                android:id="@+id/btnConvertToWord"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Convert to Word"
+                android:drawableStart="@drawable/ic_word"
+                android:backgroundTint="#FFF4E7"
+                android:textColor="#E58A1F"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
+
+        <!-- Editable Text Box -->
+        <EditText
+            android:id="@+id/editTextExtractedText"
+            android:layout_width="match_parent"
+            android:layout_height="280dp"
+            android:hint="Extracted text will appear here for editing..."
+            android:gravity="top"
+            android:background="@drawable/bg_edittext"
+            android:padding="12dp"
+            android:textSize="16sp"
+            android:inputType="textMultiLine"
+            android:textColor="@android:color/black" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Select Language"
+            android:textStyle="bold"
+            android:textSize="14sp"
+            android:layout_marginTop="7dp"
+            android:textColor="#444444"
+            android:paddingBottom="4dp" />
+
+        <Spinner
+            android:id="@+id/spinnerLanguage"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_edittext"
+            android:padding="12dp"
+            android:spinnerMode="dropdown" />
+
+
+        <!-- Format and Copy Buttons -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="12dp"
+            android:weightSum="2">
+
+            <Button
+                android:id="@+id/btnFormatText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Format Text"
+                android:drawableStart="@drawable/ic_inhance"
+                android:textColor="#0C51D4"
+                android:backgroundTint="#EAF2FF"
+                android:layout_marginEnd="8dp" />
+
+            <Button
+                android:id="@+id/btnCopyText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Copy Text"
+                android:drawableStart="@drawable/ic_copy"
+                android:textColor="#0C51D4"
+                android:backgroundTint="#EAF2FF"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
+
+        <!-- Translate Button -->
+        <Button
+            android:id="@+id/btnTranslate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Translate"
+            android:textColor="@android:color/white"
+            android:backgroundTint="#0C51D4"
+            android:layout_marginTop="16dp" />
+
+        <!-- Save Button -->
+        <Button
+            android:id="@+id/btnSave"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Save"
+            android:textColor="#0C51D4"
+            android:backgroundTint="#EAF2FF"
+            android:layout_marginTop="12dp" />
+
+    </LinearLayout>
+</ScrollView>
