@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="16dp"
+    android:background="#FFFFFF">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- Title -->
+        <TextView
+            android:id="@+id/titleText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Upload Document"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:drawableLeft="@drawable/ic_back"
+            android:drawablePadding="8dp"
+            android:textColor="#000000" />
+
+        <!-- Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="24dp"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/bg_dashed_border"
+            android:gravity="center"
+            android:elevation="2dp">
+
+            <!-- Upload Icon -->
+            <ImageView
+                android:layout_width="64dp"
+                android:layout_height="64dp"
+                android:src="@drawable/ic_upload"
+                android:contentDescription="Upload Icon"
+                android:layout_gravity="center" />
+
+            <!-- Label -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Select Document"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:layout_marginTop="12dp"
+                android:textColor="#000000" />
+
+            <!-- Subtitle -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Choose an image from your gallery"
+                android:textSize="14sp"
+                android:textColor="#777777"
+                android:layout_marginTop="4dp" />
+
+            <!-- Choose from Gallery Button -->
+            <Button
+                android:id="@+id/btnGallery"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Choose from Gallery"
+                android:textAllCaps="false"
+                android:backgroundTint="#2563EB"
+                android:textColor="#FFFFFF"
+                android:layout_marginTop="16dp" />
+
+            <!-- Take Photo Instead Button -->
+            <Button
+                android:id="@+id/btnCamera"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Take Photo Instead"
+                android:textAllCaps="false"
+                android:backgroundTint="#FFFFFF"
+                android:textColor="#000000"
+                android:background="@drawable/border_rounded"
+                android:layout_marginTop="8dp" />
+
+            <!-- Supported Formats -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Supported formats: JPG, PNG, PDF"
+                android:textSize="12sp"
+                android:textColor="#777777"
+                android:layout_marginTop="12dp" />
+
+        </LinearLayout>
+
+        <!-- Enter Text -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Enter text to translate"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginTop="24dp"
+            android:textColor="#000000" />
+
+        <EditText
+            android:id="@+id/etInputText"
+            android:layout_width="match_parent"
+            android:layout_height="150dp"
+            android:hint="Type or paste your text here"
+            android:gravity="top|start"
+            android:background="@drawable/border_rounded"
+            android:padding="12dp"
+            android:textColor="#000000"
+            android:textSize="14sp"
+            android:inputType="textMultiLine"
+            android:layout_marginTop="8dp" />
+        <Button
+            android:id="@+id/btnProceed"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Proceed"
+            android:textAllCaps="false"
+            android:backgroundTint="#FFFFFF"
+            android:textColor="#000000"
+            android:background="@drawable/border_rounded"
+            android:layout_marginTop="8dp" />
+
+    </LinearLayout>
+</ScrollView>

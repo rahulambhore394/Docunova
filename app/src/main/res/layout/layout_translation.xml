@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:id="@+id/main"
+    android:background="#FFFFFF">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- Header Row: Translation + Done -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Translation"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/doneButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Done"
+                android:backgroundTint="#EEEEEE"
+                android:textColor="#000000" />
+        </LinearLayout>
+
+        <!-- Tabs: Original | Spanish -->
+
+        <!-- Language Selector -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Select Language"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <Spinner
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:id="@+id/spinnerLanguage"
+            android:background="@drawable/spinner_background"
+            android:padding="8dp"
+            android:dropDownVerticalOffset="8dp"
+            android:popupBackground="@drawable/spinner_background" />
+
+        <ProgressBar
+            android:id="@+id/progressBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:visibility="gone"
+            android:layout_marginBottom="8dp"/>
+
+        <TextView
+            android:id="@+id/progressText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textAlignment="center"
+            android:visibility="gone"
+            android:textColor="#666666"
+            android:textSize="14sp"
+            android:layout_marginBottom="16dp"/>
+        <LinearLayout
+            android:id="@+id/tabContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:background="#F5F5F5"
+            android:padding="6dp"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="16dp"
+            android:gravity="center">
+
+            <TextView
+                android:id="@+id/tabOriginal"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Original"
+                android:gravity="center"
+                android:textSize="14sp"
+                android:textColor="#000000"
+                android:padding="10dp"
+                android:background="@drawable/tab_left_selected" />
+
+            <TextView
+                android:id="@+id/tabTranslated"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Spanish"
+                android:gravity="center"
+                android:textSize="14sp"
+                android:textColor="#000000"
+                android:padding="10dp"
+                android:background="@drawable/tab_right_unselected" />
+        </LinearLayout>
+
+
+        <!-- Translation Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:background="@drawable/rounded_card"
+            android:layout_marginBottom="24dp">
+
+            <!-- Language Icon + Title -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="8dp"
+                android:gravity="center_vertical">
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/ic_langauge" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Español"
+                    android:textStyle="bold"
+                    android:textSize="16sp"
+                    android:layout_marginStart="8dp" />
+            </LinearLayout>
+
+            <!-- Translated Text -->
+            <EditText
+                android:id="@+id/editTextTranslatedText"
+                android:layout_width="match_parent"
+                android:layout_height="330dp"
+                android:hint="Extracted text will appear here for editing..."
+                android:gravity="top"
+                android:background="@drawable/bg_edittext"
+                android:padding="12dp"
+                android:textSize="16sp"
+                android:inputType="textMultiLine"
+                android:textColor="@android:color/black" />
+        </LinearLayout>
+
+        <!-- Download Translated Version -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Download translated version"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp" />
+
+        <!-- PDF | Word Buttons -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <Button
+                android:id="@+id/pdfDownload"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="PDF"
+                android:backgroundTint="#0061FF"
+                android:textColor="#FFFFFF"
+                android:drawableStart="@drawable/ic_pdf"
+                android:drawablePadding="6dp" />
+
+            <Button
+                android:id="@+id/wordDownload"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Word"
+                android:layout_marginStart="8dp"
+                android:backgroundTint="#EEEEEE"
+                android:textColor="#000000"
+                android:drawableStart="@drawable/ic_word"
+                android:drawablePadding="6dp" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

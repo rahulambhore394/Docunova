@@ -1,5 +1,6 @@
 package com.developer_rahul.docunova
 
+import android.content.Context
 import com.developer_rahul.docunova.Fragments.Files.FilesFragment
 import com.developer_rahul.docunova.Fragments.Home.HomeFragment
 import com.developer_rahul.docunova.Fragments.Setting.SettingFragment
@@ -21,6 +22,9 @@ class MainActivity : AppCompatActivity() {
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
+        // Retrieve stored email from SharedPreferences
+        val sharedPref = this.getSharedPreferences("UserSession", Context.MODE_PRIVATE)
+        val userEmail = sharedPref.getString("email", "User")
 
         val bottomNav = findViewById<BottomNavigationView>(R.id.bottomNavigationView)
 

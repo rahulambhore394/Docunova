@@ -10,7 +10,6 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.CAMERA" />
 
-
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -22,12 +21,14 @@
         android:theme="@style/Theme.Docunova"
         tools:targetApi="31">
         <activity
-            android:name=".Fragments.Home.TextExtractorActivity"
+            android:name=".Fragments.Home.TranslationActivity"
             android:exported="false" />
-
+        <activity
+            android:name=".Fragments.Home.TypoProcessingActivity"
+            android:exported="false" />
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.provider"
+            android:authorities="${applicationId}.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data
@@ -56,6 +57,21 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".EmailConfirmationActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <!-- Custom scheme -->
+                <data
+                    android:scheme="docunova"
+                    android:host="auth" />
+            </intent-filter>
+        </activity>
+
     </application>
 
 </manifest>

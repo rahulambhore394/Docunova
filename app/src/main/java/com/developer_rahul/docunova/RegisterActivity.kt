@@ -2,24 +2,23 @@ package com.developer_rahul.docunova
 
 import android.content.Intent
 import android.os.Bundle
-import android.util.Log
 import android.util.Patterns
-import android.widget.Button
-import android.widget.EditText
-import android.widget.TextView
-import android.widget.Toast
+import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
-import kotlinx.coroutines.*
-import retrofit2.Response
+import com.developer_rahul.docunova.api.RetrofitClient
+import com.developer_rahul.docunova.api.SignUpRequest
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class RegisterActivity : AppCompatActivity() {
 
+    private lateinit var fullNameET: EditText
     private lateinit var emailET: EditText
     private lateinit var passwordET: EditText
     private lateinit var confirmPasswordET: EditText
-    private lateinit var fullNameET: EditText
     private lateinit var registerBtn: Button
-    private lateinit var have_acount: TextView
+    private lateinit var haveAccountTV: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -30,19 +29,17 @@ class RegisterActivity : AppCompatActivity() {
         passwordET = findViewById(R.id.etPassword)
         confirmPasswordET = findViewById(R.id.etConfirmPassword)
         registerBtn = findViewById(R.id.btnCreateAccount)
-        have_acount = findViewById(R.id.already_have)
+        haveAccountTV = findViewById(R.id.already_have)
 
-        have_acount.setOnClickListener {
-            val intent = Intent(this, LoginActivity::class.java)
-            startActivity(intent)
+        haveAccountTV.setOnClickListener {
+            startActivity(Intent(this, LoginActivity::class.java))
         }
 
         registerBtn.setOnClickListener {
             if (validateInputs()) {
-                val name = fullNameET.text.toString()
-                val email = emailET.text.toString()
+                val email = emailET.text.toString().trim()
                 val password = passwordET.text.toString()
-                saveUserToTable(name, email, password)
+                signUp(email, password)
             }
         }
     }
@@ -53,55 +50,60 @@ class RegisterActivity : AppCompatActivity() {
         val password = passwordET.text.toString()
         val confirm = confirmPasswordET.text.toString()
 
-        if (name.isEmpty() || email.isEmpty() || password.isEmpty() || confirm.isEmpty()) {
-            Toast.makeText(this, "Please fill all fields", Toast.LENGTH_SHORT).show()
-            return false
+        return when {
+            name.isEmpty() || email.isEmpty() || password.isEmpty() || confirm.isEmpty() -> {
+                Toast.makeText(this, "Please fill all fields", Toast.LENGTH_SHORT).show()
+                false
+            }
+            !Patterns.EMAIL_ADDRESS.matcher(email).matches() -> {
+                Toast.makeText(this, "Invalid email format", Toast.LENGTH_SHORT).show()
+                false
+            }
+            password.length < 6 -> {
+                Toast.makeText(this, "Password must be at least 6 characters", Toast.LENGTH_SHORT).show()
+                false
+            }
+            password != confirm -> {
+                Toast.makeText(this, "Passwords do not match", Toast.LENGTH_SHORT).show()
+                false
+            }
+            else -> true
         }
-
-        if (!Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
-            Toast.makeText(this, "Invalid email format", Toast.LENGTH_SHORT).show()
-            return false
-        }
-
-        if (password.length < 6) {
-            Toast.makeText(this, "Password must be at least 6 characters", Toast.LENGTH_SHORT).show()
-            return false
-        }
-
-        if (password != confirm) {
-            Toast.makeText(this, "Passwords do not match", Toast.LENGTH_SHORT).show()
-            return false
-        }
-
-        return true
     }
 
-    private fun saveUserToTable(name: String, email: String, password: String) {
-        val user = User(name, email, password)
-        val service = RetrofitClient.instance.create(SupabaseService::class.java)
-
+    private fun signUp(email: String, password: String) {
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val response: Response<Void> = service.createUser(user)
-                withContext(Dispatchers.Main) {
-                    if (response.isSuccessful) {
-                        Toast.makeText(applicationContext, "Account created successfully!", Toast.LENGTH_SHORT).show()
+                val response = RetrofitClient.instance.signUp(
+                    SignUpRequest(
+                        email = email,
+                        password = password,
+                        //redirectTo = "docunova://auth" // ✅ Important for deep link
+                    )
+                )
+
+                if (response.isSuccessful) {
+                    runOnUiThread {
+                        Toast.makeText(
+                            this@RegisterActivity,
+                            "Sign-up successful! Please check your email to confirm.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        startActivity(Intent(this@RegisterActivity, LoginActivity::class.java))
                         finish()
-                        val i = Intent(applicationContext, LoginActivity::class.java)
-                        startActivity(i);
-                        finish()
-                    } else {
-                        val errorBody = response.errorBody()?.string()
-                        Log.e("SupabaseInsert", "Failed: $errorBody")
-                        Toast.makeText(applicationContext, "Error: $errorBody", Toast.LENGTH_LONG).show()
+                    }
+                } else {
+                    val errorMsg = response.errorBody()?.string() ?: "Unknown error"
+                    runOnUiThread {
+                        Toast.makeText(this@RegisterActivity, "Error: $errorMsg", Toast.LENGTH_LONG).show()
                     }
                 }
             } catch (e: Exception) {
-                Log.e("SupabaseInsert", "Exception: ${e.message}")
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(applicationContext, "Exception: ${e.message}", Toast.LENGTH_LONG).show()
+                runOnUiThread {
+                    Toast.makeText(this@RegisterActivity, "Exception: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }
     }
+
 }

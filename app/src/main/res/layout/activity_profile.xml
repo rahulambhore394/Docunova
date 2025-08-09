@@ -55,34 +55,34 @@
                     android:layout_below="@id/profileImage"
                     android:layout_centerHorizontal="true"
                     android:layout_marginTop="12dp"
-                    android:text="John Doe"
+                    android:text="User"
                     android:textColor="@android:color/white"
                     android:textSize="18sp"
                     android:textStyle="bold" />
 
-                <TextView
-                    android:id="@+id/usernameTag"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_below="@id/userName"
-                    android:layout_centerHorizontal="true"
-                    android:text="johndoe"
-                    android:textColor="@android:color/white"
-                    android:textSize="14sp" />
+<!--                <TextView-->
+<!--                    android:id="@+id/usernameTag"-->
+<!--                    android:layout_width="wrap_content"-->
+<!--                    android:layout_height="wrap_content"-->
+<!--                    android:layout_below="@id/userName"-->
+<!--                    android:layout_centerHorizontal="true"-->
+<!--                    android:text="johndoe"-->
+<!--                    android:textColor="@android:color/white"-->
+<!--                    android:textSize="14sp" />-->
 
-                <TextView
-                    android:id="@+id/planTag"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_below="@id/usernameTag"
-                    android:layout_centerHorizontal="true"
-                    android:layout_marginTop="8dp"
-                    android:background="@drawable/rounded_blue_tag"
-                    android:paddingHorizontal="12dp"
-                    android:paddingVertical="4dp"
-                    android:text="Pro Plan"
-                    android:textColor="#3C78FF"
-                    android:textSize="12sp" />
+<!--                <TextView-->
+<!--                    android:id="@+id/planTag"-->
+<!--                    android:layout_width="wrap_content"-->
+<!--                    android:layout_height="wrap_content"-->
+<!--                    android:layout_below="@id/usernameTag"-->
+<!--                    android:layout_centerHorizontal="true"-->
+<!--                    android:layout_marginTop="8dp"-->
+<!--                    android:background="@drawable/rounded_blue_tag"-->
+<!--                    android:paddingHorizontal="12dp"-->
+<!--                    android:paddingVertical="4dp"-->
+<!--                    android:text="Pro Plan"-->
+<!--                    android:textColor="#3C78FF"-->
+<!--                    android:textSize="12sp" />-->
             </RelativeLayout>
         </androidx.cardview.widget.CardView>
 

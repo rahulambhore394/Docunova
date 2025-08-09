@@ -1,16 +1,12 @@
 package com.developer_rahul.docunova.Fragments.Home
 
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Context
 import android.content.Intent
-import android.graphics.Color
-import android.graphics.drawable.ColorDrawable
-import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
-import android.provider.OpenableColumns
 import android.util.Log
 import android.view.*
 import android.view.animation.AnimationUtils
@@ -21,6 +17,10 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.android.volley.Request
+import com.android.volley.toolbox.JsonObjectRequest
+import com.android.volley.toolbox.Volley
+import com.bumptech.glide.Glide
 import com.developer_rahul.docunova.Adapters.RecentFileAdapter
 import com.developer_rahul.docunova.ProfileActivity
 import com.developer_rahul.docunova.R
@@ -29,7 +29,6 @@ import com.google.android.material.button.MaterialButton
 import com.google.mlkit.vision.documentscanner.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -38,6 +37,9 @@ import java.util.*
 class HomeFragment : Fragment() {
 
     private val TAG = "HomeFragment"
+    private val SUPABASE_URL = "https://biudcywgygbacfxfpuva.supabase.co"
+    private val SUPABASE_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJpdWRjeXdneWdiYWNmeGZwdXZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM1Mzg1NDQsImV4cCI6MjA2OTExNDU0NH0.enJZKTQjKtOyB6VU5pYo_vf4p7ZLv2ayYuyqBWvLqbA"
+
     private var scanner: GmsDocumentScanner? = null
     private var scannerLauncher: ActivityResultLauncher<IntentSenderRequest>? = null
 
@@ -45,14 +47,9 @@ class HomeFragment : Fragment() {
     private lateinit var adapter: RecentFileAdapter
     private lateinit var db: AppDatabase
 
-    // File picker launchers
-    private val imagePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        uri?.let { launchTextExtraction(it, "image") }
-    }
-
-    private val documentPicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        uri?.let { launchTextExtraction(it, "pdf") }
-    }
+    // UI elements for user info
+    private lateinit var tv_Username: TextView
+    private lateinit var profileImage: ImageView
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -65,9 +62,15 @@ class HomeFragment : Fragment() {
 
         db = AppDatabase.getDatabase(requireContext())
 
+        // Initialize UI references here for user info
+        tv_Username = view.findViewById(R.id.tv_Username)
+        profileImage = view.findViewById(R.id.profileImage_home)
+
         initScanner()
         setupViews(view)
         setupRecyclerView(view)
+
+        fetchUserDetails()  // Fetch user profile from Supabase Auth
     }
 
     private fun initScanner() {
@@ -133,22 +136,21 @@ class HomeFragment : Fragment() {
 
     private fun setupViews(view: View) {
         val tvSelect = view.findViewById<TextView>(R.id.tv_select_upload)
-        val tvStart = view.findViewById<TextView>(R.id.tv_start_translate)
+        val tvOpenTranslate = view.findViewById<TextView>(R.id.tv_start_translate)
         val tvView = view.findViewById<TextView>(R.id.tv_view_files)
-        val profileImage = view.findViewById<ImageView>(R.id.profileImage)
         val layoutCapture = view.findViewById<ImageView>(R.id.iv_scan)
 
-        val options = listOf(tvSelect, tvStart, tvView)
+        val options = listOf(tvSelect, tvOpenTranslate, tvView)
         options.forEach { tv ->
             tv.setOnClickListener {
                 options.forEach { it.isSelected = false }
                 tv.isSelected = true
                 animateSelection(tv)
 
-                // Handle upload button click
                 if (tv == tvSelect) {
-                    val i = Intent(this@HomeFragment.requireContext(), TextExtractorActivity::class.java)
-                    startActivity(i)
+                    startActivity(Intent(requireContext(), TypoProcessingActivity::class.java))
+                } else if (tv == tvOpenTranslate) {
+                    startActivity(Intent(requireContext(), TranslationActivity::class.java))
                 }
             }
         }
@@ -171,117 +173,6 @@ class HomeFragment : Fragment() {
 
         db.recentFileDao().getAllFiles().observe(viewLifecycleOwner) { recentFiles ->
             adapter.updateFiles(recentFiles)
-        }
-    }
-
-
-
-//    private fun showFileTypeSelection() {
-//        val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_select_mode, null)
-//
-//        val dialog = AlertDialog.Builder(requireContext())
-//            .setView(dialogView)
-//            .setCancelable(true)
-//            .create()
-//
-//        // Set transparent background and rounded corners
-//        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-//        dialog.window?.requestFeature(Window.FEATURE_NO_TITLE)
-//
-//        // Handle clicks using MaterialButtons
-//        dialogView.findViewById<MaterialButton>(R.id.choose_gallery_button).setOnClickListener {
-//            dialog.dismiss()
-//            imagePicker.launch("image/*")
-//        }
-//
-//        dialogView.findViewById<MaterialButton>(R.id.take_photo_button).setOnClickListener {
-//            dialog.dismiss()
-//            documentPicker.launch("application/pdf")
-//        }
-//
-//        dialogView.findViewById<MaterialButton>(R.id.cancel_button).setOnClickListener {
-//            dialog.dismiss()
-//        }
-//
-//        dialog.show()
-//    }
-
-
-    @SuppressLint("Range")
-    private fun launchTextExtraction(uri: Uri, fileType: String) {
-        val fileName = try {
-            context?.contentResolver?.query(uri, null, null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    cursor.getString(cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME))
-                } else {
-                    uri.lastPathSegment?.substringAfterLast('/')
-                }
-            } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "Document"
-        } catch (e: Exception) {
-            Log.w(TAG, "Couldn't get file name", e)
-            "Document"
-        }
-
-        // Remove file extension if present
-        val cleanFileName = fileName.substringBeforeLast('.').takeIf { it.isNotEmpty() } ?: fileName
-
-        // Check if PDF is valid before launching
-        if (fileType == "pdf") {
-            verifyAndLaunchPdf(uri, cleanFileName)
-        } else {
-            startTextExtraction(uri, fileType, cleanFileName)
-        }
-    }
-
-    private fun verifyAndLaunchPdf(uri: Uri, fileName: String) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val parcelFileDescriptor = context?.contentResolver?.openFileDescriptor(uri, "r")
-                if (parcelFileDescriptor != null) {
-                    val pdfRenderer = PdfRenderer(parcelFileDescriptor)
-                    val isValid = pdfRenderer.pageCount > 0
-                    pdfRenderer.close()
-                    parcelFileDescriptor.close()
-
-                    withContext(Dispatchers.Main) {
-                        if (isValid) {
-                            startTextExtraction(uri, "pdf", fileName)
-                        } else {
-                            Toast.makeText(
-                                context,
-                                "The PDF file is empty or invalid",
-                                Toast.LENGTH_LONG
-                            ).show()
-                        }
-                    }
-                } else {
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(
-                            context,
-                            "Failed to open PDF file",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(
-                        context,
-                        "Error opening PDF: ${e.localizedMessage}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-        }
-    }
-
-    private fun startTextExtraction(uri: Uri, fileType: String, fileName: String) {
-        Intent(requireContext(), TextExtractorActivity::class.java).apply {
-            putExtra("fileUri", uri)
-            putExtra("fileType", fileType)
-            putExtra("fileName", fileName)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            startActivity(this)
         }
     }
 
@@ -355,5 +246,97 @@ class HomeFragment : Fragment() {
         }
 
         dialog.show()
+    }
+
+    private fun fetchUserDetails() {
+        val prefs = requireContext().getSharedPreferences("MyAppPrefs", Context.MODE_PRIVATE)
+        val loginMethod = prefs.getString("login_method", null)
+        val accessToken = prefs.getString("access_token", null)
+
+        Log.d(TAG, "Login method: $loginMethod")
+
+        if (loginMethod.isNullOrEmpty()) {
+            tv_Username.text = "Guest"
+            profileImage.setImageResource(R.drawable.ic_profile)
+            Toast.makeText(context, "Please log in first.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (loginMethod == "google") {
+            // Load from SharedPreferences saved during Google login
+            val fullName = prefs.getString("google_full_name", null)
+            val avatarUrl = prefs.getString("google_avatar_url", null)
+
+            tv_Username.text = fullName ?: "Google User"
+            if (!avatarUrl.isNullOrEmpty()) {
+                Glide.with(this)
+                    .load(avatarUrl)
+                    .placeholder(R.drawable.ic_profile)
+                    .into(profileImage)
+            } else {
+                profileImage.setImageResource(R.drawable.ic_profile)
+            }
+
+            Log.d(TAG, "Loaded Google user: $fullName, $avatarUrl")
+            return
+        }
+
+        if (loginMethod == "email") {
+            if (accessToken.isNullOrEmpty()) {
+                tv_Username.text = "Session Expired"
+                profileImage.setImageResource(R.drawable.ic_profile)
+                Toast.makeText(context, "Session expired. Please log in again.", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            val url = "$SUPABASE_URL/auth/v1/user"
+            val request = object : JsonObjectRequest(
+                Request.Method.GET, url, null,
+                { response ->
+                    try {
+                        Log.d(TAG, "User details response: $response")
+
+                        val email = response.optString("email", "No Email")
+                        val metadata = response.optJSONObject("user_metadata")
+                        val fullName = metadata?.optString("full_name") ?: email
+                        val avatarUrl = metadata?.optString("avatar_url") ?: ""
+
+                        tv_Username.text = email
+                        if (avatarUrl.isNotEmpty()) {
+                            Glide.with(this)
+                                .load(avatarUrl)
+                                .placeholder(R.drawable.ic_profile)
+                                .into(profileImage)
+                        } else {
+                            profileImage.setImageResource(R.drawable.ic_profile)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error parsing user details", e)
+                        Toast.makeText(context, "Error reading profile data", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                { error ->
+                    val code = error.networkResponse?.statusCode
+                    val body = error.networkResponse?.data?.let { String(it) }
+                    Log.e(TAG, "Error fetching user: Code=$code, Body=$body", error)
+
+                    if (code == 401) {
+                        Toast.makeText(context, "Session expired. Please log in again.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "Failed to load user profile", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            ) {
+                override fun getHeaders(): MutableMap<String, String> {
+                    return hashMapOf(
+                        "apikey" to SUPABASE_API_KEY,
+                        "Authorization" to "Bearer $accessToken",
+                        "Accept" to "application/json"
+                    )
+                }
+            }
+
+            Volley.newRequestQueue(requireContext()).add(request)
+        }
     }
 }

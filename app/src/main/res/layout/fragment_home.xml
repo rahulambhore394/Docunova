@@ -19,15 +19,26 @@
             android:background="@drawable/bg_blue_rounded_bottom">
 
             <TextView
-                android:id="@+id/tvGreeting"
+                android:id="@+id/tv_hello"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Hello, John!"
-                android:textSize="24sp"
+                android:text="Hello,"
+                android:textSize="18sp"
                 android:textStyle="bold"
                 android:textColor="@android:color/white"
                 android:layout_marginStart="20dp"
                 android:layout_marginTop="30dp" />
+
+            <TextView
+                android:id="@+id/tv_Username"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Rahul!"
+                android:textSize="24sp"
+                android:textStyle="bold"
+                android:textColor="@android:color/white"
+                android:layout_marginStart="20dp"
+                android:layout_below="@id/tv_hello"/>
 
             <TextView
                 android:id="@+id/tvSubGreeting"
@@ -36,13 +47,13 @@
                 android:text="Ready to scan some documents?"
                 android:textColor="@android:color/white"
                 android:textSize="14sp"
-                android:layout_below="@id/tvGreeting"
+                android:layout_below="@id/tv_Username"
                 android:layout_marginStart="20dp"
                 android:layout_marginTop="4dp" />
 
 
             <ImageView
-                android:id="@+id/profileImage"
+                android:id="@+id/profileImage_home"
                 android:layout_width="50dp"
                 android:layout_height="50dp"
                 android:layout_alignParentEnd="true"

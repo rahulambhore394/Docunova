@@ -92,5 +92,11 @@ dependencies {
 
     // For image rotation handling
     implementation ("androidx.exifinterface:exifinterface:1.3.6")
+//    google sign in auth
+    implementation ("com.google.android.gms:play-services-auth:20.7.0")
+
+    implementation ("com.airbnb.android:lottie:6.0.0")
+
+
 
 }
