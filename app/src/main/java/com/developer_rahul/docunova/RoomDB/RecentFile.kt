@@ -9,5 +9,6 @@ data class RecentFile(
     var name: String,
     var filePath: String,
     val thumbnailUri: String,
-    val date: String
+    val date: String,
+    val isSynced: Boolean = false
 )

@@ -10,7 +10,6 @@ import android.graphics.Matrix
 import android.graphics.PorterDuff
 import android.graphics.Typeface
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
@@ -24,6 +23,7 @@ import androidx.core.content.FileProvider
 import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.lifecycleScope
 import com.developer_rahul.docunova.R
+import com.developer_rahul.docunova.ProcessingDialog
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -33,12 +33,12 @@ import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.Translator
 import com.google.mlkit.nl.translate.TranslatorOptions
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
-import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -49,8 +49,7 @@ class TranslationActivity : AppCompatActivity() {
     private lateinit var tabTranslated: TextView
     private lateinit var spinnerLanguages: Spinner
     private lateinit var textViewTranslatedContent: EditText
-    private lateinit var progressBar: ProgressBar
-    private lateinit var progressText: TextView
+    private lateinit var processingDialog: ProcessingDialog
     private lateinit var textRecognizer: com.google.mlkit.vision.text.TextRecognizer
 
     private var extractedText = ""
@@ -58,6 +57,7 @@ class TranslationActivity : AppCompatActivity() {
     private var fileType: String = "unknown"
     private var translator: Translator? = null
     private var currentPhotoPath: String? = null
+    private var currentExtractionJob: Job? = null
 
     private val languages = listOf("Select Language", "Hindi", "Marathi", "Spanish", "French", "German", "Tamil", "Gujarati", "Kannada", "Bengali", "Punjabi")
     private val languageCodes = mapOf(
@@ -107,17 +107,10 @@ class TranslationActivity : AppCompatActivity() {
 
         // Initialize ML Kit text recognizer
         textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        processingDialog = ProcessingDialog(this)
 
         // Initialize UI components
         container = findViewById(R.id.container)
-        progressBar = findViewById(R.id.progressBar)
-        progressText = findViewById(R.id.progressText)
-
-        // Set progress bar color
-        progressBar.indeterminateDrawable.setColorFilter(
-            ContextCompat.getColor(this, R.color.blue),
-            PorterDuff.Mode.SRC_IN
-        )
 
         // Check if we have text passed from previous activity
         if (intent.hasExtra("EXTRACTED_TEXT")) {
@@ -131,6 +124,16 @@ class TranslationActivity : AppCompatActivity() {
             startTextExtraction(selectedFileUri!!, mimeType)
         } else {
             showUploadLayout()
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        translator?.close()
+        textRecognizer.close()
+        currentExtractionJob?.cancel()
+        if (processingDialog.isShowing()) {
+            processingDialog.dismiss()
         }
     }
 
@@ -181,7 +184,7 @@ class TranslationActivity : AppCompatActivity() {
     }
 
     private fun startTextExtraction(uri: Uri, mimeType: String?) {
-        showProgress(true, "Extracting text...")
+        processingDialog.show(message = "Extracting text...")
 
         fileType = when {
             mimeType?.startsWith("image/") == true -> "image"
@@ -189,7 +192,7 @@ class TranslationActivity : AppCompatActivity() {
             else -> "unknown"
         }
 
-        lifecycleScope.launch {
+        currentExtractionJob = lifecycleScope.launch {
             try {
                 when (fileType) {
                     "image" -> extractTextFromImage(uri)
@@ -205,7 +208,7 @@ class TranslationActivity : AppCompatActivity() {
                 showError("Error extracting text: ${e.message}")
                 showUploadLayout()
             } finally {
-                showProgress(false)
+                processingDialog.dismiss()
             }
         }
     }
@@ -346,7 +349,7 @@ class TranslationActivity : AppCompatActivity() {
             return
         }
 
-        showProgress(true, "Translating to $selectedLanguage...")
+        processingDialog.show(message = "Translating to $selectedLanguage...")
 
         // Close previous translator if exists
         translator?.close()
@@ -368,7 +371,7 @@ class TranslationActivity : AppCompatActivity() {
                 // Perform translation
                 translator?.translate(extractedText)
                     ?.addOnSuccessListener { translatedText ->
-                        showProgress(false)
+                        processingDialog.dismiss()
                         textViewTranslatedContent.setText(translatedText)
                         Toast.makeText(
                             this,
@@ -377,7 +380,7 @@ class TranslationActivity : AppCompatActivity() {
                         ).show()
                     }
                     ?.addOnFailureListener { e ->
-                        showProgress(false)
+                        processingDialog.dismiss()
                         Toast.makeText(
                             this,
                             "Translation failed: ${e.message}",
@@ -386,7 +389,7 @@ class TranslationActivity : AppCompatActivity() {
                     }
             }
             ?.addOnFailureListener { e ->
-                showProgress(false)
+                processingDialog.dismiss()
                 Toast.makeText(
                     this,
                     "Model download failed: ${e.message}",
@@ -430,7 +433,7 @@ class TranslationActivity : AppCompatActivity() {
                 photoFile?.also {
                     val photoURI = FileProvider.getUriForFile(
                         this,
-                        "${packageName}.fileprovider", // Must match manifest exactly
+                        "${packageName}.fileprovider",
                         it
                     )
                     currentPhotoPath = it.absolutePath
@@ -464,30 +467,10 @@ class TranslationActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateProgress(currentPage: Int, totalPages: Int) {
-        runOnUiThread {
-            progressText.text = "Processing page $currentPage of $totalPages"
-        }
-    }
-
-    private fun showProgress(show: Boolean, message: String = "") {
-        runOnUiThread {
-            progressBar.visibility = if (show) View.VISIBLE else View.GONE
-            progressText.visibility = if (show) View.VISIBLE else View.GONE
-            progressText.text = message
-        }
-    }
-
     private fun showError(message: String) {
         runOnUiThread {
             Log.e(TAG, message)
             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        translator?.close()
-        textRecognizer.close()
     }
 }

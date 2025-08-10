@@ -15,11 +15,14 @@ object StorageUtils {
 
     fun createNewPdfFile(context: Context, fileName: String): File {
         val storageDir = getDocunovaStorageDir(context)
-        return File(storageDir, fileName)
+        return File(storageDir, "$fileName.pdf")
     }
 
     fun getCurrentDate(): String {
-        val sdf = SimpleDateFormat("dd MMM yyyy HH:mm", Locale.getDefault())
-        return sdf.format(Date())
+        return SimpleDateFormat("dd MMM yyyy HH:mm", Locale.getDefault()).format(Date())
+    }
+
+    fun getFileExtension(fileName: String): String {
+        return fileName.substringAfterLast('.', "")
     }
 }

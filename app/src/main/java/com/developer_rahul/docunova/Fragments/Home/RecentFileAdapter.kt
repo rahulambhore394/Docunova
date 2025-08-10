@@ -14,8 +14,11 @@ import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.developer_rahul.docunova.R
 import com.developer_rahul.docunova.RoomDB.RecentFile
-class RecentFileAdapter(private var list: List<RecentFile>) :
-    RecyclerView.Adapter<RecentFileAdapter.FileViewHolder>() {
+
+class RecentFileAdapter(
+    private var list: List<RecentFile>,
+    private val onItemClick: (RecentFile) -> Unit
+) : RecyclerView.Adapter<RecentFileAdapter.FileViewHolder>() {
 
     class FileViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val thumbImage: ImageView = view.findViewById(R.id.imageThumbnail2)
@@ -31,45 +34,43 @@ class RecentFileAdapter(private var list: List<RecentFile>) :
 
     override fun getItemCount(): Int = list.size
 
-//    override fun onBindViewHolder(holder: FileViewHolder, position: Int) {
-//        val file = list[position]
-//        holder.fileName.text = file.name
-//        holder.fileDate.text = file.date
-//        Glide.with(holder.itemView.context)
-//            .load(Uri.parse(file.thumbnailUri))
-//            .into(holder.thumbImage)
-//    }
-override fun onBindViewHolder(holder: FileViewHolder, position: Int) {
-    val file = list[position]
-    holder.fileName.text = file.name
-    holder.fileDate.text = file.date
-    Glide.with(holder.itemView.context)
+    override fun onBindViewHolder(holder: FileViewHolder, position: Int) {
+        val file = list[position]
+        holder.fileName.text = file.name
+        holder.fileDate.text = file.date
+
+        Glide.with(holder.itemView.context)
             .load(Uri.parse(file.thumbnailUri))
             .into(holder.thumbImage)
 
-    holder.itemView.setOnClickListener {
-        val context = holder.itemView.context
-        val actualFile = java.io.File(file.filePath)
-
-        val uri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.provider",
-            actualFile
-        )
-
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/pdf")
-            flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NO_HISTORY
-        }
-
-        try {
-            context.startActivity(intent)
-        } catch (e: ActivityNotFoundException) {
-            Toast.makeText(context, "No PDF viewer found!", Toast.LENGTH_SHORT).show()
+        holder.itemView.setOnClickListener {
+            if (file.filePath.isNotEmpty()) {
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(
+                            FileProvider.getUriForFile(
+                                holder.itemView.context,
+                                "${holder.itemView.context.packageName}.provider",
+                                java.io.File(file.filePath)
+                            ),
+                            "application/pdf"
+                        )
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    holder.itemView.context.startActivity(intent)
+                } catch (e: ActivityNotFoundException) {
+                    Toast.makeText(holder.itemView.context, "No PDF viewer found!", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(holder.itemView.context, "Error opening file", Toast.LENGTH_SHORT).show()
+                    // Trigger download if file doesn't exist locally
+                    onItemClick(file)
+                }
+            } else {
+                // Trigger download if file path is empty
+                onItemClick(file)
+            }
         }
     }
-}
-
 
     fun updateFiles(newList: List<RecentFile>) {
         list = newList

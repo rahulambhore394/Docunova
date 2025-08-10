@@ -1,6 +1,7 @@
 package com.developer_rahul.docunova.Fragments.Home
 
 import android.Manifest
+import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -36,6 +37,7 @@ import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.developer_rahul.docunova.R
+import com.developer_rahul.docunova.ProcessingDialog
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
@@ -43,13 +45,15 @@ import com.itextpdf.kernel.pdf.PdfDocument
 import com.itextpdf.kernel.pdf.PdfReader
 import com.itextpdf.kernel.pdf.canvas.parser.PdfTextExtractor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
 import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.util.*
+import java.util.concurrent.atomic.AtomicBoolean
 
 class TypoProcessingActivity : AppCompatActivity() {
 
@@ -62,9 +66,8 @@ class TypoProcessingActivity : AppCompatActivity() {
     private lateinit var generateWordButton: Button
     private lateinit var formatButton: Button
     private lateinit var saveButton: Button
-    private lateinit var progressBar: ProgressBar
-    private lateinit var progressText: TextView
     private lateinit var recentImagesRecycler: RecyclerView
+    private lateinit var processingDialog: ProcessingDialog
 
     // File data
     private var selectedFileUri: Uri? = null
@@ -72,8 +75,10 @@ class TypoProcessingActivity : AppCompatActivity() {
     private lateinit var originalFileName: String
     private var currentPhotoPath: String? = null
 
-    // ML Kit components
+    // Processing
     private val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    private var currentExtractionJob: Job? = null
+    private val isProcessing = AtomicBoolean(false)
 
     companion object {
         private const val TAG = "TypoProcessingActivity"
@@ -81,26 +86,29 @@ class TypoProcessingActivity : AppCompatActivity() {
         const val REQUEST_STORAGE_PERMISSION = 102
         private const val MAX_IMAGE_DIMENSION = 1000
         private const val MAX_RECENT_IMAGES = 16
+        private const val INDENT_PER_LEVEL = 30
     }
 
-    // Camera permission launcher
+    // Permission launchers
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
         if (isGranted) {
             openCamera()
         } else {
-            Toast.makeText(this, "Camera permission denied", Toast.LENGTH_SHORT).show()
+            if (!ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.CAMERA)) {
+                showPermissionSettingsDialog("Camera permission is required to take photos")
+            } else {
+                Toast.makeText(this, "Camera permission denied", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
-    // Camera result launcher
     private val takePictureLauncher = registerForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { success ->
         if (success && currentPhotoPath != null) {
             selectedFileUri = Uri.fromFile(File(currentPhotoPath))
-            // Show convert layout first to initialize UI components
             showConvertLayout(selectedFileUri!!, "image/jpeg")
         }
     }
@@ -108,9 +116,17 @@ class TypoProcessingActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_text_extraction)
-
+        processingDialog = ProcessingDialog(this)
         container = findViewById(R.id.container)
         showUploadLayout()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        currentExtractionJob?.cancel()
+        if (processingDialog.isShowing()) {
+            processingDialog.dismiss()
+        }
     }
 
     private fun showUploadLayout() {
@@ -118,11 +134,9 @@ class TypoProcessingActivity : AppCompatActivity() {
         container.removeAllViews()
         container.addView(uploadView)
 
-        // Initialize RecyclerView
         recentImagesRecycler = uploadView.findViewById(R.id.recentImagesRecycler)
         recentImagesRecycler.layoutManager = GridLayoutManager(this, 4)
 
-        // Check permission before loading images
         checkStoragePermission()
 
         uploadView.findViewById<Button>(R.id.chooseGalleryBtn).setOnClickListener {
@@ -130,24 +144,63 @@ class TypoProcessingActivity : AppCompatActivity() {
         }
 
         uploadView.findViewById<Button>(R.id.takePhotoBtn).setOnClickListener {
-            checkCameraPermission() // FIX: Call permission check before opening camera
+            checkCameraPermission()
         }
     }
 
     private fun checkStoragePermission() {
-        if (ContextCompat.checkSelfPermission(
+        when {
+            ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.READ_EXTERNAL_STORAGE
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            loadRecentImages()
-        } else {
-            ActivityCompat.requestPermissions(
+            ) == PackageManager.PERMISSION_GRANTED -> {
+                loadRecentImages()
+            }
+            ActivityCompat.shouldShowRequestPermissionRationale(
                 this,
-                arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE),
-                REQUEST_STORAGE_PERMISSION
-            )
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            ) -> {
+                showPermissionRationale(
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    "Storage permission is needed to access your recent images"
+                )
+            }
+            else -> {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE),
+                    REQUEST_STORAGE_PERMISSION
+                )
+            }
         }
+    }
+
+    private fun showPermissionRationale(permission: String, message: String) {
+        AlertDialog.Builder(this)
+            .setTitle("Permission Needed")
+            .setMessage(message)
+            .setPositiveButton("OK") { _, _ ->
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(permission),
+                    REQUEST_STORAGE_PERMISSION
+                )
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showPermissionSettingsDialog(message: String) {
+        AlertDialog.Builder(this)
+            .setTitle("Permission Required")
+            .setMessage("$message. Please enable it in app settings.")
+            .setPositiveButton("Go to Settings") { _, _ ->
+                val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                intent.data = Uri.parse("package:$packageName")
+                startActivity(intent)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     override fun onRequestPermissionsResult(
@@ -156,43 +209,14 @@ class TypoProcessingActivity : AppCompatActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQUEST_STORAGE_PERMISSION) {
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                loadRecentImages()
-            } else {
-                Toast.makeText(
-                    this,
-                    "Permission needed to show recent images",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        }
-    }
-
-    private fun loadRecentImages() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val images = getRecentImages()
-                runOnUiThread {
-                    if (images.isNotEmpty()) {
-                        recentImagesRecycler.adapter = RecentImagesAdapter(images) { uri ->
-                            val mimeType = contentResolver.getType(uri)
-                            showConvertLayout(uri, mimeType)
-                        }
-                    } else {
-                        Toast.makeText(
-                            this@TypoProcessingActivity,
-                            "No recent images found",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error loading recent images", e)
-                runOnUiThread {
+        when (requestCode) {
+            REQUEST_STORAGE_PERMISSION -> {
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    loadRecentImages()
+                } else {
                     Toast.makeText(
-                        this@TypoProcessingActivity,
-                        "Error loading images: ${e.message}",
+                        this,
+                        "Permission needed to show recent images",
                         Toast.LENGTH_SHORT
                     ).show()
                 }
@@ -200,36 +224,68 @@ class TypoProcessingActivity : AppCompatActivity() {
         }
     }
 
-    private fun getRecentImages(): List<Uri> {
-        val imageUris = mutableListOf<Uri>()
-        val projection = arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_ADDED)
-        val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+    private fun loadRecentImages() {
+        if (isProcessing.get()) return
 
-        val cursor: Cursor? = contentResolver.query(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            projection,
-            null,
-            null,
-            sortOrder
-        )
-
-        cursor?.use {
-            val idColumn = it.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-            var count = 0
-            while (it.moveToNext() && count < MAX_RECENT_IMAGES) {
-                val id = it.getLong(idColumn)
-                val contentUri = Uri.withAppendedPath(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    id.toString()
-                )
-                imageUris.add(contentUri)
-                count++
+        lifecycleScope.launch(Dispatchers.IO) {
+            isProcessing.set(true)
+            try {
+                val images = getRecentImages()
+                withContext(Dispatchers.Main) {
+                    if (images.isNotEmpty()) {
+                        recentImagesRecycler.adapter = RecentImagesAdapter(images) { uri ->
+                            val mimeType = contentResolver.getType(uri)
+                            showConvertLayout(uri, mimeType)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error loading recent images", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        this@TypoProcessingActivity,
+                        "Error loading images: ${e.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            } finally {
+                isProcessing.set(false)
             }
         }
-        return imageUris
     }
 
-    // Recent Images Adapter
+    private fun getRecentImages(): List<Uri> {
+        return try {
+            val imageUris = mutableListOf<Uri>()
+            val projection = arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_ADDED)
+            val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+
+            contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                null,
+                null,
+                sortOrder
+            )?.use { cursor ->
+                val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                var count = 0
+                while (cursor.moveToNext() && count < MAX_RECENT_IMAGES) {
+                    val id = cursor.getLong(idColumn)
+                    val contentUri = Uri.withAppendedPath(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        id.toString()
+                    )
+                    imageUris.add(contentUri)
+                    count++
+                }
+            }
+            imageUris
+        } catch (e: Exception) {
+            Log.e(TAG, "Error querying images", e)
+            emptyList()
+        }
+    }
+
     private inner class RecentImagesAdapter(
         private val images: List<Uri>,
         private val onItemClick: (Uri) -> Unit
@@ -247,7 +303,7 @@ class TypoProcessingActivity : AppCompatActivity() {
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
             val uri = images[position]
-            Glide.with(this@TypoProcessingActivity)
+            Glide.with(holder.itemView.context.applicationContext)
                 .load(uri)
                 .placeholder(R.drawable.ic_placeholder)
                 .centerCrop()
@@ -265,11 +321,9 @@ class TypoProcessingActivity : AppCompatActivity() {
         container.removeAllViews()
         container.addView(convertView)
 
-        // Initialize UI components FIRST
+        // Initialize UI components
         fileNameTextView = convertView.findViewById(R.id.editTextDocumentName)
         extractedTextEditText = convertView.findViewById(R.id.editTextExtractedText)
-        progressBar = convertView.findViewById(R.id.progressBar)  // Initialize progressBar
-        progressText = convertView.findViewById(R.id.progressText)
         copyButton = convertView.findViewById(R.id.btnCopyText)
         generatePdfButton = convertView.findViewById(R.id.btnConvertToPDF)
         generateWordButton = convertView.findViewById(R.id.btnConvertToWord)
@@ -294,14 +348,16 @@ class TypoProcessingActivity : AppCompatActivity() {
         formatButton.setOnClickListener { formatExtractedText() }
         saveButton.setOnClickListener { saveEditedText() }
 
-        // Start text extraction AFTER UI is initialized
-        startTextExtraction(uri, "image/jpeg")
+        // Start text extraction
+        startTextExtraction(uri, mimeType)
     }
 
-    private fun startTextExtraction(uri: Uri, string: String) {
-        showProgress(true, "Extracting text...")
+    private fun startTextExtraction(uri: Uri, mimeType: String?) {
+        if (isProcessing.get()) return
 
-        lifecycleScope.launch {
+        processingDialog.show(message = "Extracting text...")
+        currentExtractionJob = lifecycleScope.launch(Dispatchers.IO) {
+            isProcessing.set(true)
             try {
                 when (fileType) {
                     "image" -> extractTextFromImage(uri)
@@ -311,7 +367,10 @@ class TypoProcessingActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 showError("Error extracting text: ${e.message}")
             } finally {
-                showProgress(false)
+                isProcessing.set(false)
+                withContext(Dispatchers.Main) {
+                    processingDialog.dismiss()
+                }
             }
         }
     }
@@ -322,35 +381,26 @@ class TypoProcessingActivity : AppCompatActivity() {
                 inJustDecodeBounds = true
             }
 
-            // First get image dimensions
             contentResolver.openInputStream(uri)?.use { stream ->
                 BitmapFactory.decodeStream(stream, null, options)
             }
 
-            // Calculate sample size
             options.inSampleSize = calculateInSampleSize(options, MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION)
             options.inJustDecodeBounds = false
 
-            // Decode bitmap with proper sampling
             val bitmap = contentResolver.openInputStream(uri)?.use { stream ->
                 BitmapFactory.decodeStream(stream, null, options)
-            }
+            } ?: throw IOException("Failed to decode image")
 
-            if (bitmap == null) {
-                showError("Failed to decode image")
-                return
-            }
-
-            // Rotate bitmap if needed
             val rotatedBitmap = rotateBitmapIfRequired(bitmap, uri)
             val image = InputImage.fromBitmap(rotatedBitmap, 0)
             val result = textRecognizer.process(image).await()
 
-            runOnUiThread {
+            withContext(Dispatchers.Main) {
                 extractedTextEditText.setText(result.text)
             }
         } catch (e: Exception) {
-            showError("Failed to process image: ${e.message}")
+            throw IOException("Failed to process image: ${e.message}")
         }
     }
 
@@ -398,45 +448,62 @@ class TypoProcessingActivity : AppCompatActivity() {
     }
 
     private suspend fun extractTextFromPdf(uri: Uri) {
-        contentResolver.openInputStream(uri)?.use { inputStream ->
+        val parcelFileDescriptor = try {
+            contentResolver.openFileDescriptor(uri, "r")
+                ?: throw IOException("Failed to open PDF")
+        } catch (e: Exception) {
+            throw IOException("Error opening PDF: ${e.message}")
+        }
+
+        try {
+            // First try with iText
             try {
-                val pdfReader = PdfReader(inputStream)
-                val pdfDocument = PdfDocument(pdfReader)
-                val pageCount = pdfDocument.numberOfPages
-                val stringBuilder = StringBuilder()
+                contentResolver.openInputStream(uri)?.use { inputStream ->
+                    val pdfReader = PdfReader(inputStream)
+                    val pdfDocument = PdfDocument(pdfReader)
+                    val pageCount = pdfDocument.numberOfPages
+                    val stringBuilder = StringBuilder()
 
-                for (i in 1..pageCount) {
-                    updateProgress(i, pageCount)
-                    val text = PdfTextExtractor.getTextFromPage(pdfDocument.getPage(i))
-                    stringBuilder.append(text).append("\n\n")
+                    for (i in 1..pageCount) {
+                        if (isProcessing.get().not()) break
+                        updateProgress(i, pageCount)
+                        val text = PdfTextExtractor.getTextFromPage(pdfDocument.getPage(i))
+                        stringBuilder.append(text).append("\n\n")
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        extractedTextEditText.setText(stringBuilder.toString())
+                    }
+
+                    pdfDocument.close()
+                    pdfReader.close()
+                    return
                 }
-
-                runOnUiThread {
-                    extractedTextEditText.setText(stringBuilder.toString())
-                }
-
-                pdfDocument.close()
-                pdfReader.close()
             } catch (e: Exception) {
-                Log.e(TAG, "iText PDF extraction error: ${e.message}")
-                // Fallback to OCR if iText fails (e.g., scanned PDF)
-                fallbackToPdfOcr(uri)
+                Log.w(TAG, "iText extraction failed, falling back to OCR")
             }
-        } ?: throw IOException("Failed to open PDF stream")
+
+            // Fallback to OCR
+            fallbackToPdfOcr(parcelFileDescriptor)
+        } finally {
+            try {
+                parcelFileDescriptor.close()
+            } catch (e: IOException) {
+                Log.e(TAG, "Error closing PDF", e)
+            }
+        }
     }
 
-    private suspend fun fallbackToPdfOcr(uri: Uri) {
-        Log.w(TAG, "Falling back to OCR for PDF extraction")
-        val parcelFileDescriptor = contentResolver.openFileDescriptor(uri, "r")
-            ?: throw IOException("Failed to open PDF file")
-
+    private suspend fun fallbackToPdfOcr(parcelFileDescriptor: android.os.ParcelFileDescriptor) {
         try {
             val pdfRenderer = android.graphics.pdf.PdfRenderer(parcelFileDescriptor)
             val pageCount = pdfRenderer.pageCount
             val stringBuilder = StringBuilder()
 
             for (i in 0 until pageCount) {
+                if (isProcessing.get().not()) break
                 updateProgress(i + 1, pageCount)
+
                 pdfRenderer.openPage(i).use { page ->
                     val scale = calculateOptimalScale(page.width, page.height)
                     val bitmap = try {
@@ -461,24 +528,17 @@ class TypoProcessingActivity : AppCompatActivity() {
                 }
             }
 
-            runOnUiThread {
+            withContext(Dispatchers.Main) {
                 extractedTextEditText.setText(stringBuilder.toString())
             }
 
             pdfRenderer.close()
         } catch (e: Exception) {
             throw IOException("OCR fallback failed: ${e.message}")
-        } finally {
-            try {
-                parcelFileDescriptor.close()
-            } catch (e: IOException) {
-                Log.e(TAG, "Error closing file descriptor", e)
-            }
         }
     }
 
     private fun calculateOptimalScale(pageWidth: Int, pageHeight: Int): Float {
-        // Target dimensions to fit in memory
         val maxWidth = 1200
         val maxHeight = 1600
 
@@ -508,7 +568,7 @@ class TypoProcessingActivity : AppCompatActivity() {
             return
         }
 
-        showProgress(true, "Generating PDF...")
+        processingDialog.show(message = "Generating PDF...")
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -519,8 +579,8 @@ class TypoProcessingActivity : AppCompatActivity() {
                     fileName
                 )
 
-                runOnUiThread {
-                    showProgress(false)
+                withContext(Dispatchers.Main) {
+                    processingDialog.dismiss()
                     Toast.makeText(
                         this@TypoProcessingActivity,
                         "PDF generated: ${pdfFile.name}",
@@ -529,8 +589,8 @@ class TypoProcessingActivity : AppCompatActivity() {
                     openFile(pdfFile, "application/pdf")
                 }
             } catch (e: Exception) {
-                runOnUiThread {
-                    showProgress(false)
+                withContext(Dispatchers.Main) {
+                    processingDialog.dismiss()
                     showError("Failed to generate PDF: ${e.message}")
                 }
             }
@@ -544,7 +604,7 @@ class TypoProcessingActivity : AppCompatActivity() {
             return
         }
 
-        showProgress(true, "Generating Word document...")
+        processingDialog.show(message = "Generating Word document...")
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -555,8 +615,8 @@ class TypoProcessingActivity : AppCompatActivity() {
                     fileName
                 )
 
-                runOnUiThread {
-                    showProgress(false)
+                withContext(Dispatchers.Main) {
+                    processingDialog.dismiss()
                     Toast.makeText(
                         this@TypoProcessingActivity,
                         "Word document generated: ${wordFile.name}",
@@ -565,8 +625,8 @@ class TypoProcessingActivity : AppCompatActivity() {
                     openFile(wordFile, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
                 }
             } catch (e: Exception) {
-                runOnUiThread {
-                    showProgress(false)
+                withContext(Dispatchers.Main) {
+                    processingDialog.dismiss()
                     showError("Failed to generate Word document: ${e.message}")
                 }
             }
@@ -580,59 +640,74 @@ class TypoProcessingActivity : AppCompatActivity() {
             return
         }
 
-        // Enhanced text cleaning
-        val cleanedText = rawText
-            .replace("\\s+".toRegex(), " ")          // Collapse multiple spaces
-            .replace("(\\s*\\n){3,}".toRegex(), "\n\n")  // Reduce excessive newlines
-            .replace("^\\s+|\\s+$".toRegex(), "")   // Trim start/end
-            .trim()
+        processingDialog.show(message = "Formatting text...")
 
-        val paragraphs = cleanedText.split("\n\n").map { it.trim() }
-        val formattedText = SpannableStringBuilder()
-        var currentListType: ListType? = null
-        var listCounter = 1
-        var isFirstParagraph = true
+        lifecycleScope.launch(Dispatchers.Default) {
+            try {
+                val cleanedText = rawText
+                    .replace("\\s+".toRegex(), " ")
+                    .replace("(\\s*\\n){3,}".toRegex(), "\n\n")
+                    .replace("^\\s+|\\s+$".toRegex(), "")
+                    .trim()
 
-        for (paragraph in paragraphs) {
-            if (paragraph.isBlank()) continue
+                val paragraphs = cleanedText.split("\n\n").map { it.trim() }
+                val formattedText = SpannableStringBuilder()
+                var currentListType: ListType? = null
+                var listCounter = 1
+                var isFirstParagraph = true
 
-            val paragraphType = when {
-                isHeading(paragraph) -> ParagraphType.HEADING
-                isSubheading(paragraph) -> ParagraphType.SUBHEADING
-                isList(paragraph) -> ParagraphType.LIST
-                else -> ParagraphType.NORMAL
-            }
+                for (paragraph in paragraphs) {
+                    if (paragraph.isBlank()) continue
 
-            // Reset list state when encountering non-list paragraph
-            if (paragraphType != ParagraphType.LIST) {
-                currentListType = null
-                listCounter = 1
-            }
-
-            // Add proper spacing between paragraphs
-            if (!isFirstParagraph) {
-                formattedText.append("\n\n")
-            }
-
-            when (paragraphType) {
-                ParagraphType.HEADING -> formatHeading(formattedText, paragraph)
-                ParagraphType.SUBHEADING -> formatSubheading(formattedText, paragraph)
-                ParagraphType.LIST -> {
-                    val detectedListType = detectListType(paragraph)
-                    if (currentListType != detectedListType) {
-                        listCounter = 1
-                        currentListType = detectedListType
+                    val paragraphType = when {
+                        isHeading(paragraph) -> ParagraphType.HEADING
+                        isSubheading(paragraph) -> ParagraphType.SUBHEADING
+                        isList(paragraph) -> ParagraphType.LIST
+                        else -> ParagraphType.NORMAL
                     }
-                    listCounter = formatList(formattedText, paragraph, detectedListType, listCounter)
+
+                    if (paragraphType != ParagraphType.LIST) {
+                        currentListType = null
+                        listCounter = 1
+                    }
+
+                    if (!isFirstParagraph) {
+                        formattedText.append("\n\n")
+                    }
+
+                    when (paragraphType) {
+                        ParagraphType.HEADING -> formatHeading(formattedText, paragraph)
+                        ParagraphType.SUBHEADING -> formatSubheading(formattedText, paragraph)
+                        ParagraphType.LIST -> {
+                            val detectedListType = detectListType(paragraph)
+                            if (currentListType != detectedListType) {
+                                listCounter = 1
+                                currentListType = detectedListType
+                            }
+                            listCounter = formatList(formattedText, paragraph, detectedListType, listCounter)
+                        }
+                        ParagraphType.NORMAL -> formatNormalParagraph(formattedText, paragraph)
+                    }
+
+                    isFirstParagraph = false
                 }
-                ParagraphType.NORMAL -> formatNormalParagraph(formattedText, paragraph)
+
+                withContext(Dispatchers.Main) {
+                    extractedTextEditText.setText(formattedText)
+                    processingDialog.dismiss()
+                    Toast.makeText(
+                        this@TypoProcessingActivity,
+                        "Document formatted",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    processingDialog.dismiss()
+                    showError("Error formatting text: ${e.message}")
+                }
             }
-
-            isFirstParagraph = false
         }
-
-        extractedTextEditText.setText(formattedText)
-        Toast.makeText(this, "Document formatted", Toast.LENGTH_SHORT).show()
     }
 
     private enum class ParagraphType { HEADING, SUBHEADING, LIST, NORMAL }
@@ -640,8 +715,8 @@ class TypoProcessingActivity : AppCompatActivity() {
 
     private fun isList(text: String): Boolean {
         val listPatterns = listOf(
-            Regex("^(\\s*)([•\\-*]|\\d+[.)])\\s+"),  // Bullet or numbered items
-            Regex("\\n(\\s*)([•\\-*]|\\d+[.)])\\s+") // List items after newline
+            Regex("^(\\s*)([•\\-*]|\\d+[.)])\\s+"),
+            Regex("\\n(\\s*)([•\\-*]|\\d+[.)])\\s+")
         )
         return listPatterns.any { it.containsMatchIn(text) }
     }
@@ -659,7 +734,6 @@ class TypoProcessingActivity : AppCompatActivity() {
     ): Int {
         val lines = text.split("\n")
         var counter = startCounter
-        val indentPerLevel = 30
 
         for (line in lines) {
             if (line.isBlank()) continue
@@ -667,12 +741,11 @@ class TypoProcessingActivity : AppCompatActivity() {
             val listItemPattern = Regex("^(\\s*)([•\\-*]|\\d+[.)])\\s+")
             val matchResult = listItemPattern.find(line)
             val indentLevel = matchResult?.groups?.get(1)?.value?.length ?: 0
-            val indentSize = indentPerLevel * (indentLevel / 2 + 1)  // Calculate indentation
+            val indentSize = INDENT_PER_LEVEL * (indentLevel / 2 + 1)
 
             val content = line.replace(listItemPattern, "").trim()
             val start = builder.length
 
-            // Add appropriate list marker
             when (listType) {
                 ListType.BULLET -> builder.append("• ")
                 ListType.NUMBERED -> builder.append("${counter++}. ")
@@ -682,7 +755,6 @@ class TypoProcessingActivity : AppCompatActivity() {
             builder.append("\n")
             val end = builder.length
 
-            // Apply indentation
             builder.setSpan(
                 LeadingMarginSpan.Standard(indentSize, 0),
                 start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
@@ -730,7 +802,7 @@ class TypoProcessingActivity : AppCompatActivity() {
         builder.append(text)
         val end = builder.length
 
-        builder.setSpan(LeadingMarginSpan.Standard(30, 0), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        builder.setSpan(LeadingMarginSpan.Standard(INDENT_PER_LEVEL, 0), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
 
     private fun saveEditedText() {
@@ -740,7 +812,7 @@ class TypoProcessingActivity : AppCompatActivity() {
             return
         }
 
-        showProgress(true, "Saving text...")
+        processingDialog.show(message = "Saving text...")
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -751,8 +823,8 @@ class TypoProcessingActivity : AppCompatActivity() {
                 val textFile = File(folder, fileName)
                 textFile.writeText(text)
 
-                runOnUiThread {
-                    showProgress(false)
+                withContext(Dispatchers.Main) {
+                    processingDialog.dismiss()
                     Toast.makeText(
                         this@TypoProcessingActivity,
                         "Text saved: ${textFile.name}",
@@ -761,8 +833,8 @@ class TypoProcessingActivity : AppCompatActivity() {
                     openFile(textFile, "text/plain")
                 }
             } catch (e: Exception) {
-                runOnUiThread {
-                    showProgress(false)
+                withContext(Dispatchers.Main) {
+                    processingDialog.dismiss()
                     showError("Failed to save text: ${e.message}")
                 }
             }
@@ -803,6 +875,15 @@ class TypoProcessingActivity : AppCompatActivity() {
                 Manifest.permission.CAMERA
             ) == PackageManager.PERMISSION_GRANTED -> {
                 openCamera()
+            }
+            ActivityCompat.shouldShowRequestPermissionRationale(
+                this,
+                Manifest.permission.CAMERA
+            ) -> {
+                showPermissionRationale(
+                    Manifest.permission.CAMERA,
+                    "Camera permission is needed to take photos"
+                )
             }
             else -> {
                 requestPermissionLauncher.launch(Manifest.permission.CAMERA)
@@ -858,15 +939,7 @@ class TypoProcessingActivity : AppCompatActivity() {
 
     private fun updateProgress(currentPage: Int, totalPages: Int) {
         runOnUiThread {
-            progressText.text = "Processing page $currentPage of $totalPages"
-        }
-    }
-
-    private fun showProgress(show: Boolean, message: String = "") {
-        runOnUiThread {
-            progressBar.visibility = if (show) View.VISIBLE else View.GONE
-            progressText.visibility = if (show) View.VISIBLE else View.GONE
-            progressText.text = message
+            processingDialog.updateText(message = "Processing page $currentPage of $totalPages")
         }
     }
 
