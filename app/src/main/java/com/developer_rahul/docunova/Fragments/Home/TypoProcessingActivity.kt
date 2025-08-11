@@ -946,6 +946,7 @@ class TypoProcessingActivity : AppCompatActivity() {
     private fun showError(message: String) {
         runOnUiThread {
             Log.e(TAG, message)
+
             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         }
     }

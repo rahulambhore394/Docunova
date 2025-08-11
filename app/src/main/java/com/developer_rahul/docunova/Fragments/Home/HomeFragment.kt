@@ -39,7 +39,8 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
+import org.json.JSONObject
+import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -55,11 +56,19 @@ class HomeFragment : Fragment() {
     private var scannerLauncher: ActivityResultLauncher<IntentSenderRequest>? = null
 
     private lateinit var recyclerView: RecyclerView
-    private lateinit var adapter: RecentFileAdapter
+    private val adapter by lazy {
+        RecentFileAdapter(emptyList()) { file ->
+            if (file.filePath.isNotEmpty()) {
+                openDocumentFromSupabase(file)
+            } else {
+                downloadDocument(file)
+            }
+        }
+    }
     private lateinit var db: AppDatabase
 
     // UI elements
-    private lateinit var tv_Username: TextView
+    private lateinit var tvUsername: TextView
     private lateinit var profileImage: ImageView
 
     override fun onCreateView(
@@ -74,82 +83,132 @@ class HomeFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
 
         db = AppDatabase.getDatabase(requireContext())
-
-        // Initialize UI
-        tv_Username = view.findViewById(R.id.tv_Username)
-        profileImage = view.findViewById(R.id.profileImage_home)
-
-        initScanner()
-        setupViews(view)
-        setupRecyclerView(view)
-
+        initializeViews(view)
+        setupScanner()
+        setupRecyclerView()
         fetchUserDetails()
         fetchUserDocumentsFromSupabase()
     }
 
-    private fun initScanner() {
-        val options = GmsDocumentScannerOptions.Builder()
-            .setGalleryImportAllowed(true)
-            .setPageLimit(20)
-            .setResultFormats(
-                GmsDocumentScannerOptions.RESULT_FORMAT_JPEG,
-                GmsDocumentScannerOptions.RESULT_FORMAT_PDF
-            )
-            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
-            .build()
+    private fun initializeViews(view: View) {
+        tvUsername = view.findViewById(R.id.tv_Username)
+        profileImage = view.findViewById(R.id.profileImage_home)
 
-        scanner = GmsDocumentScanning.getClient(options)
-        scannerLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-            if (result.resultCode == Activity.RESULT_OK) {
-                GmsDocumentScanningResult.fromActivityResultIntent(result.data)?.let { scanResult ->
-                    val pdfResult = scanResult.pdf
-                    val thumbnailUri = scanResult.pages?.firstOrNull()?.imageUri
+        view.findViewById<ImageView>(R.id.iv_scan).setOnClickListener {
+            Log.d(TAG, "Scan button clicked")
+            launchDocumentScanner()
+        }
+        profileImage.setOnClickListener {
+            startActivity(Intent(requireContext(), ProfileActivity::class.java))
+        }
 
-                    if (pdfResult != null && thumbnailUri != null) {
-                        promptFileNameAndSave(pdfResult.uri, thumbnailUri)
-                    } else {
-                        Toast.makeText(context, "Scan result is empty", Toast.LENGTH_SHORT).show()
+        setupOptionButtons(view)
+    }
+
+    private fun setupOptionButtons(view: View) {
+        val options = listOf(
+            view.findViewById<TextView>(R.id.tv_select_upload),
+            view.findViewById<TextView>(R.id.tv_start_translate),
+            view.findViewById<TextView>(R.id.tv_view_files)
+        )
+
+        options.forEach { button ->
+            button.setOnClickListener {
+                options.forEach { it.isSelected = false }
+                button.isSelected = true
+                animateSelection(button)
+
+                when (button.id) {
+                    R.id.tv_select_upload -> {
+                        Log.d(TAG, "Select upload clicked")
+                        startActivity(Intent(requireContext(), TypoProcessingActivity::class.java))
+                    }
+                    R.id.tv_start_translate -> {
+                        Log.d(TAG, "Start translate clicked")
+                        startActivity(Intent(requireContext(), TranslationActivity::class.java))
                     }
                 }
             }
         }
     }
 
+    private fun setupScanner() {
+        scanner = GmsDocumentScanning.getClient(
+            GmsDocumentScannerOptions.Builder()
+                .setGalleryImportAllowed(true)
+                .setPageLimit(20)
+                .setResultFormats(
+                    GmsDocumentScannerOptions.RESULT_FORMAT_JPEG,
+                    GmsDocumentScannerOptions.RESULT_FORMAT_PDF
+                )
+                .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+                .build()
+        )
+
+        scannerLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                Log.d(TAG, "Scan result received")
+                handleScanResult(result.data)
+            } else {
+                Log.d(TAG, "Scan cancelled or failed")
+            }
+        }
+    }
+
+    private fun handleScanResult(data: Intent?) {
+        try {
+            val scanResult = GmsDocumentScanningResult.fromActivityResultIntent(data)
+            if (scanResult != null) {
+                val pdfResult = scanResult.pdf
+                val thumbnailUri = scanResult.pages?.firstOrNull()?.imageUri
+
+                if (pdfResult != null && thumbnailUri != null) {
+                    Log.d(TAG, "Valid scan result received")
+                    promptFileNameAndSave(pdfResult.uri, thumbnailUri)
+                } else {
+                    Log.d(TAG, "Scan result is empty")
+                    Toast.makeText(context, "Scan result is empty", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error handling scan result", e)
+            Toast.makeText(context, "Error processing scan", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun promptFileNameAndSave(pdfUri: Uri, thumbnailUri: Uri) {
-        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        val defaultName = "Scan_$timestamp"
+        Log.d(TAG, "Prompting for file name")
 
-        val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_filename_prompt, null)
-        val input = dialogView.findViewById<EditText>(R.id.filename_input)
-        input.setText(defaultName)
-        input.setSelection(defaultName.length)
-
-        val animation = AnimationUtils.loadAnimation(requireContext(), R.anim.dialog_fade_in)
-        dialogView.startAnimation(animation)
+        val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_filename_prompt, null).apply {
+            findViewById<EditText>(R.id.filename_input).apply {
+                setText("Scan_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())}")
+                setSelection(text.length)
+            }
+            startAnimation(AnimationUtils.loadAnimation(requireContext(), R.anim.dialog_fade_in))
+        }
 
         val dialog = AlertDialog.Builder(requireContext())
             .setView(dialogView)
             .setCancelable(false)
             .setPositiveButton("Save", null)
-            .setNegativeButton("Cancel") { d, _ -> d.dismiss() }
+            .setNegativeButton("Cancel") { d, _ ->
+                Log.d(TAG, "Save cancelled")
+                d.dismiss()
+            }
             .create()
 
         dialog.setOnShowListener {
             val saveButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
             saveButton.setOnClickListener {
-                val enteredName = input.text.toString().trim()
-                if (enteredName.isEmpty()) {
-                    input.error = "File name cannot be empty"
-                    return@setOnClickListener
-                }
-
-                // Check if file exists in Supabase
-                checkFileExists(enteredName) { exists ->
-                    if (exists) {
-                        input.error = "A file with this name already exists"
-                    } else {
-                        uploadToSupabaseStorage(pdfUri, enteredName, thumbnailUri)
-                        dialog.dismiss()
+                val fileName = dialogView.findViewById<EditText>(R.id.filename_input).text.toString().trim()
+                when {
+                    fileName.isEmpty() -> {
+                        dialogView.findViewById<EditText>(R.id.filename_input).error = "File name cannot be empty"
+                        Log.d(TAG, "Empty file name entered")
+                    }
+                    else -> {
+                        Log.d(TAG, "Attempting to save file: $fileName")
+                        checkAndUploadFile(pdfUri, fileName, thumbnailUri, dialog)
                     }
                 }
             }
@@ -157,314 +216,423 @@ class HomeFragment : Fragment() {
         dialog.show()
     }
 
-    private fun checkFileExists(fileName: String, callback: (Boolean) -> Unit) {
-        val prefs = requireContext().getSharedPreferences("MyAppPrefs", Context.MODE_PRIVATE)
-        val accessToken = prefs.getString("access_token", null) ?: return
-        val userId = prefs.getString("user_id", null) ?: return
+    private fun checkAndUploadFile(pdfUri: Uri, fileName: String, thumbnailUri: Uri, dialog: AlertDialog) {
+        Log.d(TAG, "Checking if file exists: $fileName")
 
-        val url = "$SUPABASE_STORAGE_URL/object/info/$BUCKET_NAME/$userId/$fileName.pdf"
-        val request = object : JsonObjectRequest(
-            Request.Method.GET, url, null,
-            { response ->
-                // File exists if we get a response
-                callback(true)
-            },
-            { error ->
-                // File doesn't exist if we get 404
-                callback(error.networkResponse?.statusCode != 404)
-            }
-        ) {
-            override fun getHeaders(): MutableMap<String, String> {
-                return hashMapOf(
-                    "apikey" to SUPABASE_API_KEY,
-                    "Authorization" to "Bearer $accessToken"
-                )
-            }
-        }
+        getUserIdAndToken()?.let { (userId, token) ->
+            val url = "$SUPABASE_STORAGE_URL/object/info/$BUCKET_NAME/$userId/$fileName.pdf"
 
-        Volley.newRequestQueue(requireContext()).add(request)
-    }
-
-    private fun uploadToSupabaseStorage(pdfUri: Uri, fileName: String, thumbnailUri: Uri) {
-        val prefs = requireContext().getSharedPreferences("MyAppPrefs", Context.MODE_PRIVATE)
-        val accessToken = prefs.getString("access_token", null) ?: run {
-            Toast.makeText(context, "Not authenticated", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val userId = prefs.getString("user_id", null) ?: run {
-            Toast.makeText(context, "User not found", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        try {
-            // Read PDF content from URI
-            val inputStream = requireContext().contentResolver.openInputStream(pdfUri)
-            val byteArray = inputStream?.readBytes() ?: run {
-                Toast.makeText(context, "Failed to read PDF", Toast.LENGTH_SHORT).show()
-                return
-            }
-
-            val url = "$SUPABASE_STORAGE_URL/object/$BUCKET_NAME/$userId/$fileName.pdf"
-            val request = object : StringRequest(
-                Request.Method.POST, url,
+            val existsRequest = object : JsonObjectRequest(
+                Request.Method.GET, url, null,
                 { response ->
-                    Log.d(TAG, "File uploaded successfully: $fileName")
-
-                    // Save record in local database without local file path
-                    val recentFile = RecentFile(
-                        name = fileName,
-                        filePath = "", // No local path
-                        thumbnailUri = thumbnailUri.toString(),
-                        date = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date()),
-                        isSynced = true
-                    )
-
-                    lifecycleScope.launch(Dispatchers.IO) {
-                        db.recentFileDao().insert(recentFile)
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(context, "Document saved to cloud", Toast.LENGTH_SHORT).show()
-                        }
+                    Log.d(TAG, "File exists check response: $response")
+                    activity?.runOnUiThread {
+                        dialog.findViewById<EditText>(R.id.filename_input)?.error =
+                            "A file with this name already exists"
                     }
                 },
                 { error ->
-                    Log.e(TAG, "Error uploading file: ${error.message}")
-                    Toast.makeText(context, "Failed to upload to cloud", Toast.LENGTH_SHORT).show()
+                    Log.d(TAG, "File exists check error: ${error.networkResponse?.statusCode}")
+                    if (error.networkResponse?.statusCode == 404) {
+                        // File doesn't exist, proceed with upload
+                        activity?.runOnUiThread {
+                            dialog.dismiss()
+                            uploadToSupabaseStorage(pdfUri, fileName, thumbnailUri)
+                        }
+                    } else {
+                        activity?.runOnUiThread {
+                            Toast.makeText(context, "Error checking file existence", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 }
             ) {
-                override fun getHeaders(): MutableMap<String, String> {
-                    return hashMapOf(
-                        "apikey" to SUPABASE_API_KEY,
-                        "Authorization" to "Bearer $accessToken",
-                        "Content-Type" to "application/pdf"
-                    )
-                }
-
-                override fun getBody(): ByteArray {
-                    return byteArray
-                }
+                override fun getHeaders() = mapOf(
+                    "apikey" to SUPABASE_API_KEY,
+                    "Authorization" to "Bearer $token"
+                ).toMutableMap()
             }
 
-            Volley.newRequestQueue(requireContext()).add(request)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error preparing file for upload", e)
-            Toast.makeText(context, "Error preparing upload", Toast.LENGTH_SHORT).show()
+            Volley.newRequestQueue(requireContext()).add(existsRequest)
+        } ?: run {
+            Toast.makeText(context, "Not authenticated", Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
         }
+    }
+
+    private fun uploadToSupabaseStorage(pdfUri: Uri, fileName: String, thumbnailUri: Uri) {
+        Log.d(TAG, "Starting upload for file: $fileName")
+
+        getUserIdAndToken()?.let { (userId, token) ->
+            try {
+                val inputStream = requireContext().contentResolver.openInputStream(pdfUri)
+                    ?: throw Exception("Failed to open PDF stream")
+
+                val pdfBytes = inputStream.use { it.readBytes() }
+                Log.d(TAG, "PDF size: ${pdfBytes.size} bytes")
+
+                val uploadRequest = object : StringRequest(
+                    Request.Method.POST,
+                    "$SUPABASE_STORAGE_URL/object/$BUCKET_NAME/$userId/$fileName.pdf",
+                    { response ->
+                        Log.d(TAG, "Upload successful: $response")
+                        saveFileToDatabase(fileName, thumbnailUri)
+                    },
+                    { error ->
+                        Log.e(TAG, "Upload failed: ${error.message}")
+                        activity?.runOnUiThread {
+                            Toast.makeText(context, "Failed to upload document", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                ) {
+                    override fun getHeaders(): MutableMap<String, String> {
+                        return hashMapOf(
+                            "apikey" to SUPABASE_API_KEY,
+                            "Authorization" to "Bearer $token",
+                            "Content-Type" to "application/pdf"
+                        )
+                    }
+
+                    override fun getBody(): ByteArray {
+                        return pdfBytes
+                    }
+                }
+
+                Volley.newRequestQueue(requireContext()).add(uploadRequest)
+                Log.d(TAG, "Upload request queued")
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Error preparing upload: ${e.message}")
+                activity?.runOnUiThread {
+                    Toast.makeText(context, "Error preparing document for upload", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } ?: run {
+            Toast.makeText(context, "Not authenticated", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun saveFileToDatabase(fileName: String, thumbnailUri: Uri) {
+        Log.d(TAG, "Saving file to database: $fileName")
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val recentFile = RecentFile(
+                    name = fileName,
+                    filePath = "", // We're not storing locally
+                    thumbnailUri = thumbnailUri.toString(),
+                    date = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date()),
+                    isSynced = true
+                )
+
+                db.recentFileDao().insert(recentFile)
+                Log.d(TAG, "File saved to database")
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "Document saved successfully", Toast.LENGTH_SHORT).show()
+                    fetchUserDocumentsFromSupabase()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Database save error: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "Failed to save document record", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun setupRecyclerView() {
+        Log.d(TAG, "Setting up recycler view")
+
+        recyclerView = requireView().findViewById<RecyclerView>(R.id.recentFilesRecycler).apply {
+            layoutManager = LinearLayoutManager(requireContext())
+            adapter = this@HomeFragment.adapter
+        }
+
+        db.recentFileDao().getAllFiles().observe(viewLifecycleOwner) { files ->
+            Log.d(TAG, "Updating adapter with ${files.size} files")
+            adapter.updateFiles(files ?: emptyList())
+        }
+
+        fetchUserDocumentsFromSupabase()
     }
 
     private fun fetchUserDocumentsFromSupabase() {
-        val prefs = requireContext().getSharedPreferences("MyAppPrefs", Context.MODE_PRIVATE)
-        val accessToken = prefs.getString("access_token", null) ?: return
-        val userId = prefs.getString("user_id", null) ?: return
+        Log.d(TAG, "Fetching user documents from Supabase")
 
-        val url = "$SUPABASE_STORAGE_URL/object/list/$BUCKET_NAME?prefix=$userId/"
-        val request = object : JsonObjectRequest(
-            Request.Method.GET, url, null,
-            { response ->
-                try {
-                    val documents = mutableListOf<RecentFile>()
-                    val items = response.getJSONArray("data")
+        getUserIdAndToken()?.let { (userId, token) ->
+            val url = "$SUPABASE_STORAGE_URL/object/list/$BUCKET_NAME?prefix=$userId/"
 
-                    for (i in 0 until items.length()) {
-                        val item = items.getJSONObject(i)
-                        val name = item.getString("name").substringAfterLast('/')
-                        val createdAt = item.getString("created_at")
-
-                        documents.add(RecentFile(
-                            name = name,
-                            filePath = "", // No local path
-                            thumbnailUri = "",
-                            date = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
-                                .format(SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
-                                    .parse(createdAt) ?: Date()),
-                            isSynced = true
-                        ))
+            val request = object : JsonObjectRequest(
+                Request.Method.GET, url, null,
+                { response ->
+                    Log.d(TAG, "Documents fetch successful")
+                    handleDocumentsResponse(response)
+                },
+                { error ->
+                    Log.e(TAG, "Documents fetch failed: ${error.message}")
+                    activity?.runOnUiThread {
+                        Toast.makeText(context, "Failed to load documents", Toast.LENGTH_SHORT).show()
                     }
-
-                    lifecycleScope.launch(Dispatchers.Main) {
-                        adapter.updateFiles(documents)
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error parsing documents list", e)
                 }
-            },
-            { error ->
-                Log.e(TAG, "Error fetching documents", error)
-            }
-        ) {
-            override fun getHeaders(): MutableMap<String, String> {
-                return hashMapOf(
+            ) {
+                override fun getHeaders() = mapOf(
                     "apikey" to SUPABASE_API_KEY,
-                    "Authorization" to "Bearer $accessToken"
+                    "Authorization" to "Bearer $token"
+                ).toMutableMap()
+            }
+
+            Volley.newRequestQueue(requireContext()).add(request)
+        } ?: run {
+            Log.d(TAG, "Not authenticated - skipping documents fetch")
+        }
+    }
+
+    private fun handleDocumentsResponse(response: JSONObject) {
+        try {
+            val documents = mutableListOf<RecentFile>()
+            val items = response.getJSONArray("data")
+            Log.d(TAG, "Found ${items.length()} documents")
+
+            for (i in 0 until items.length()) {
+                val item = items.getJSONObject(i)
+                documents.add(
+                    RecentFile(
+                        name = item.getString("name").substringAfterLast('/'),
+                        filePath = "",
+                        thumbnailUri = "",
+                        date = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
+                            .format(
+                                SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+                                    .parse(item.getString("created_at")) ?: Date()
+                            ),
+                        isSynced = true
+                    )
                 )
             }
-        }
 
-        Volley.newRequestQueue(requireContext()).add(request)
-    }
-
-    private fun setupViews(view: View) {
-        val tvSelect = view.findViewById<TextView>(R.id.tv_select_upload)
-        val tvOpenTranslate = view.findViewById<TextView>(R.id.tv_start_translate)
-        val tvView = view.findViewById<TextView>(R.id.tv_view_files)
-        val layoutCapture = view.findViewById<ImageView>(R.id.iv_scan)
-
-        val options = listOf(tvSelect, tvOpenTranslate, tvView)
-        options.forEach { tv ->
-            tv.setOnClickListener {
-                options.forEach { it.isSelected = false }
-                tv.isSelected = true
-                animateSelection(tv)
-
-                when (tv) {
-                    tvSelect -> startActivity(Intent(requireContext(), TypoProcessingActivity::class.java))
-                    tvOpenTranslate -> startActivity(Intent(requireContext(), TranslationActivity::class.java))
-                }
+            lifecycleScope.launch(Dispatchers.Main) {
+                adapter.updateFiles(documents)
             }
-        }
-
-        layoutCapture.setOnClickListener {
-            scanDocument()
-        }
-
-        profileImage.setOnClickListener {
-            startActivity(Intent(requireContext(), ProfileActivity::class.java))
-        }
-    }
-
-    private fun setupRecyclerView(view: View) {
-        recyclerView = view.findViewById(R.id.recentFilesRecycler)
-        recyclerView.layoutManager = LinearLayoutManager(requireContext())
-        adapter = RecentFileAdapter(emptyList()) { file ->
-            if (file.name.isNotEmpty()) {
-                openDocumentFromSupabase(file)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing documents", e)
+            activity?.runOnUiThread {
+                Toast.makeText(context, "Error processing documents", Toast.LENGTH_SHORT).show()
             }
-        }
-        recyclerView.adapter = adapter
-
-        db.recentFileDao().getAllFiles().observe(viewLifecycleOwner) { recentFiles ->
-            adapter.updateFiles(recentFiles)
         }
     }
 
     private fun openDocumentFromSupabase(file: RecentFile) {
-        val prefs = requireContext().getSharedPreferences("MyAppPrefs", Context.MODE_PRIVATE)
-        val accessToken = prefs.getString("access_token", null) ?: return
-        val userId = prefs.getString("user_id", null) ?: return
+        Log.d(TAG, "Attempting to open document: ${file.name}")
 
-        val url = "$SUPABASE_STORAGE_URL/object/$BUCKET_NAME/$userId/${file.name}"
-        val intent = Intent(Intent.ACTION_VIEW)
-        intent.data = Uri.parse(url)
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        getUserIdAndToken()?.let { (userId, _) ->
+            try {
+                val url = "$SUPABASE_STORAGE_URL/object/$BUCKET_NAME/$userId/${file.name}"
+                Log.d(TAG, "Document URL: $url")
 
-        // Try to open with browser if no PDF viewer handles the URL
-        if (intent.resolveActivity(requireContext().packageManager) == null) {
-            intent.setDataAndType(Uri.parse(url), "application/pdf")
-        }
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    data = Uri.parse(url)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
 
-        try {
-            startActivity(intent)
-        } catch (e: Exception) {
-            Toast.makeText(context, "No app available to open PDF", Toast.LENGTH_SHORT).show()
+                if (intent.resolveActivity(requireContext().packageManager) == null) {
+                    intent.setDataAndType(Uri.parse(url), "application/pdf")
+                }
+
+                startActivity(intent)
+                Log.d(TAG, "Document opened successfully")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error opening document", e)
+                Toast.makeText(context, "No app available to open PDF", Toast.LENGTH_SHORT).show()
+            }
+        } ?: run {
+            Toast.makeText(context, "Not authenticated", Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun animateSelection(view: View) {
-        view.animate().scaleX(1.05f).scaleY(1.05f).setDuration(150)
-            .withEndAction {
-                view.animate().scaleX(1f).scaleY(1f).duration = 100
-            }
-    }
+    private fun downloadDocument(file: RecentFile) {
+        Log.d(TAG, "Downloading document: ${file.name}")
 
-    private fun scanDocument() {
-        scanner?.getStartScanIntent(requireActivity())
-            ?.addOnSuccessListener { intentSender ->
-                scannerLauncher?.launch(IntentSenderRequest.Builder(intentSender).build())
-            }
-            ?.addOnFailureListener {
-                Toast.makeText(context, "Failed to start scan", Toast.LENGTH_SHORT).show()
-                Log.e(TAG, "Scanner launch error", it)
-            }
-    }
+        getUserIdAndToken()?.let { (userId, token) ->
+            val url = "$SUPABASE_STORAGE_URL/object/$BUCKET_NAME/$userId/${file.name}"
 
-
-
-    private fun fetchUserDetails() {
-        val prefs = requireContext().getSharedPreferences("MyAppPrefs", Context.MODE_PRIVATE)
-        val loginMethod = prefs.getString("login_method", null)
-        val accessToken = prefs.getString("access_token", null)
-
-        Log.d(TAG, "Login method: $loginMethod")
-
-        if (loginMethod.isNullOrEmpty()) {
-            tv_Username.text = "Guest"
-            profileImage.setImageResource(R.drawable.ic_profile)
-            Toast.makeText(context, "Please log in first.", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        if (loginMethod == "google") {
-            val fullName = prefs.getString("google_full_name", null)
-            val avatarUrl = prefs.getString("google_avatar_url", null)
-
-            tv_Username.text = fullName ?: "Google User"
-            if (!avatarUrl.isNullOrEmpty()) {
-                Glide.with(this)
-                    .load(avatarUrl)
-                    .placeholder(R.drawable.ic_profile)
-                    .into(profileImage)
-            } else {
-                profileImage.setImageResource(R.drawable.ic_profile)
-            }
-            return
-        }
-
-        if (loginMethod == "email" && accessToken != null) {
-            val url = "$SUPABASE_URL/auth/v1/user"
-            val request = object : JsonObjectRequest(
-                Request.Method.GET, url, null,
+            val request = object : StringRequest(
+                Request.Method.GET, url,
                 { response ->
-                    try {
-                        val email = response.optString("email", "No Email")
-                        val metadata = response.optJSONObject("user_metadata")
-                        val fullName = metadata?.optString("full_name") ?: email
-                        val avatarUrl = metadata?.optString("avatar_url") ?: ""
-
-                        tv_Username.text = email
-                        if (avatarUrl.isNotEmpty()) {
-                            Glide.with(this)
-                                .load(avatarUrl)
-                                .placeholder(R.drawable.ic_profile)
-                                .into(profileImage)
-                        } else {
-                            profileImage.setImageResource(R.drawable.ic_profile)
+                    Log.d(TAG, "Download successful")
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        db.recentFileDao().updateFilePath(file.id, "remote:$url")
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "Document ready to view", Toast.LENGTH_SHORT).show()
+                            openDocumentFromSupabase(file)
                         }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error parsing user details", e)
-                        Toast.makeText(context, "Error reading profile data", Toast.LENGTH_SHORT).show()
                     }
                 },
                 { error ->
-                    val code = error.networkResponse?.statusCode
-                    Log.e(TAG, "Error fetching user: Code=$code", error)
-
-                    if (code == 401) {
-                        Toast.makeText(context, "Session expired. Please log in again.", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(context, "Failed to load user profile", Toast.LENGTH_SHORT).show()
+                    Log.e(TAG, "Download failed: ${error.message}")
+                    activity?.runOnUiThread {
+                        Toast.makeText(context, "Download failed", Toast.LENGTH_SHORT).show()
                     }
                 }
             ) {
-                override fun getHeaders(): MutableMap<String, String> {
-                    return hashMapOf(
-                        "apikey" to SUPABASE_API_KEY,
-                        "Authorization" to "Bearer $accessToken",
-                        "Accept" to "application/json"
-                    )
-                }
+                override fun getHeaders() = mapOf(
+                    "apikey" to SUPABASE_API_KEY,
+                    "Authorization" to "Bearer $token"
+                ).toMutableMap()
             }
 
             Volley.newRequestQueue(requireContext()).add(request)
+        } ?: run {
+            Toast.makeText(context, "Not authenticated", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun launchDocumentScanner() {
+        Log.d(TAG, "Launching document scanner")
+
+        scanner?.getStartScanIntent(requireActivity())
+            ?.addOnSuccessListener { intentSender ->
+                Log.d(TAG, "Scanner launched successfully")
+                scannerLauncher?.launch(IntentSenderRequest.Builder(intentSender).build())
+            }
+            ?.addOnFailureListener {
+                Log.e(TAG, "Scanner launch failed", it)
+                Toast.makeText(context, "Failed to start scanner", Toast.LENGTH_SHORT).show()
+            }
+    }
+
+    private fun animateSelection(view: View) {
+        view.animate()
+            .scaleX(1.05f)
+            .scaleY(1.05f)
+            .setDuration(150)
+            .withEndAction {
+                view.animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(100)
+                    .start()
+            }
+            .start()
+    }
+
+    private fun fetchUserDetails() {
+        Log.d(TAG, "Fetching user details")
+
+        val prefs = requireContext().getSharedPreferences("MyAppPrefs", Context.MODE_PRIVATE)
+        when (prefs.getString("login_method", null)) {
+            "google" -> {
+                Log.d(TAG, "User logged in via Google")
+                displayGoogleUserInfo(prefs)
+            }
+            "email" -> {
+                Log.d(TAG, "User logged in via email")
+                fetchSupabaseUserInfo(prefs)
+            }
+            else -> {
+                Log.d(TAG, "User not logged in")
+                showGuestUser()
+            }
+        }
+    }
+
+    private fun displayGoogleUserInfo(prefs: android.content.SharedPreferences) {
+        val fullName = prefs.getString("google_full_name", null) ?: "Google User"
+        val avatarUrl = prefs.getString("google_avatar_url", null)
+
+        tvUsername.text = fullName
+
+        if (!avatarUrl.isNullOrEmpty()) {
+            Glide.with(this)
+                .load(avatarUrl)
+                .placeholder(R.drawable.ic_profile)
+                .into(profileImage)
+        } else {
+            profileImage.setImageResource(R.drawable.ic_profile)
+        }
+    }
+
+    private fun fetchSupabaseUserInfo(prefs: android.content.SharedPreferences) {
+        prefs.getString("access_token", null)?.let { token ->
+            Log.d(TAG, "Fetching user info from Supabase")
+
+            val request = object : JsonObjectRequest(
+                Request.Method.GET,
+                "$SUPABASE_URL/auth/v1/user",
+                null,
+                { response ->
+                    Log.d(TAG, "User info fetch successful")
+                    handleUserResponse(response)
+                },
+                { error ->
+                    Log.e(TAG, "User info fetch failed", error)
+                    handleUserError(error)
+                }
+            ) {
+                override fun getHeaders() = mapOf(
+                    "apikey" to SUPABASE_API_KEY,
+                    "Authorization" to "Bearer $token",
+                    "Accept" to "application/json"
+                ).toMutableMap()
+            }
+
+            Volley.newRequestQueue(requireContext()).add(request)
+        } ?: showSessionExpired()
+    }
+
+    private fun handleUserResponse(response: JSONObject) {
+        try {
+            val email = response.optString("email", "No Email")
+            val metadata = response.optJSONObject("user_metadata")
+
+            tvUsername.text = email
+
+            metadata?.optString("avatar_url")?.takeIf { it.isNotEmpty() }?.let { url ->
+                Glide.with(this)
+                    .load(url)
+                    .placeholder(R.drawable.ic_profile)
+                    .into(profileImage)
+            } ?: profileImage.setImageResource(R.drawable.ic_profile)
+
+            Log.d(TAG, "User info displayed: $email")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing user info", e)
+            Toast.makeText(context, "Error reading profile", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun handleUserError(error: com.android.volley.VolleyError) {
+        if (error.networkResponse?.statusCode == 401) {
+            Log.d(TAG, "Session expired")
+            showSessionExpired()
+        } else {
+            Log.e(TAG, "User info fetch error", error)
+            Toast.makeText(context, "Profile load failed", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun showGuestUser() {
+        tvUsername.text = "Guest"
+        profileImage.setImageResource(R.drawable.ic_profile)
+        Toast.makeText(context, "Please log in", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun showSessionExpired() {
+        tvUsername.text = "Session Expired"
+        profileImage.setImageResource(R.drawable.ic_profile)
+        Toast.makeText(context, "Please log in again", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun getUserIdAndToken(): Pair<String, String>? {
+        val prefs = requireContext().getSharedPreferences("MyAppPrefs", Context.MODE_PRIVATE)
+        val userId = prefs.getString("user_id", null)
+        val token = prefs.getString("access_token", null)
+
+        return if (userId != null && token != null) {
+            Log.d(TAG, "User authenticated: $userId")
+            userId to token
+        } else {
+            Log.d(TAG, "User not authenticated")
+            null
         }
     }
 }
