@@ -76,12 +76,13 @@
                 android:layout_marginEnd="8dp" />
 
             <!-- Download Icon -->
-            <ImageView
-                android:id="@+id/downloadIcon"
-                android:layout_width="27dp"
-                android:layout_height="27dp"
+            <ImageButton
+                android:id="@+id/downloadBtn"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
                 android:src="@drawable/ic_downlaod"
-                card_view:tint="#3F54F4" />
+                android:contentDescription="Download File"
+                android:background="?attr/selectableItemBackgroundBorderless"/>
         </LinearLayout>
     </LinearLayout>
 </androidx.cardview.widget.CardView>

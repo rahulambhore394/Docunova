@@ -2,7 +2,6 @@ package com.developer_rahul.docunova
 
 import android.content.Context
 import com.developer_rahul.docunova.Fragments.Files.FilesFragment
-import com.developer_rahul.docunova.Fragments.Home.HomeFragment
 import com.developer_rahul.docunova.Fragments.Setting.SettingFragment
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
@@ -10,6 +9,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import androidx.fragment.app.Fragment
+import com.developer_rahul.docunova.Fragments.Home.HomeFragment
 
 class MainActivity : AppCompatActivity() {
 

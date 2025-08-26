@@ -49,5 +49,6 @@ class ProcessingDialog(context: Context) {
         if (dialog.isShowing) dialog.dismiss()
     }
 
+
     fun isShowing(): Boolean = dialog.isShowing
 }

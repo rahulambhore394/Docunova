@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
@@ -28,10 +29,18 @@ import com.android.volley.toolbox.StringRequest
 import com.android.volley.toolbox.Volley
 import com.bumptech.glide.Glide
 import com.developer_rahul.docunova.Adapters.RecentFileAdapter
+import com.developer_rahul.docunova.DriveServiceHelper
+import com.developer_rahul.docunova.DriveServiceHelper.downloadFile
 import com.developer_rahul.docunova.ProfileActivity
 import com.developer_rahul.docunova.R
 import com.developer_rahul.docunova.RoomDB.AppDatabase
 import com.developer_rahul.docunova.RoomDB.RecentFile
+import com.developer_rahul.docunova.GoogleDriveClient
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.Scope
+import com.google.api.services.drive.DriveScopes
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanner
@@ -40,7 +49,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.io.InputStream
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -51,6 +60,8 @@ class HomeFragment : Fragment() {
     private val SUPABASE_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJpdWRjeXdneWdiYWNmeGZwdXZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM1Mzg1NDQsImV4cCI6MjA2OTExNDU0NH0.enJZKTQjKtOyB6VU5pYo_vf4p7ZLv2ayYuyqBWvLqbA"
     private val SUPABASE_STORAGE_URL = "$SUPABASE_URL/storage/v1"
     private val BUCKET_NAME = "user-documents"
+    private lateinit var driveAdapter: DriveFileAdapter
+
 
     private var scanner: GmsDocumentScanner? = null
     private var scannerLauncher: ActivityResultLauncher<IntentSenderRequest>? = null
@@ -67,9 +78,20 @@ class HomeFragment : Fragment() {
     }
     private lateinit var db: AppDatabase
 
-    // UI elements
     private lateinit var tvUsername: TextView
     private lateinit var profileImage: ImageView
+
+    // --- Google Drive sign-in for email-login users or missing permission
+    private lateinit var googleDriveSignInLauncher: ActivityResultLauncher<Intent>
+    private val driveGso by lazy {
+        GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestScopes(Scope(DriveScopes.DRIVE_FILE))
+            .build()
+    }
+    private val driveSignInClient by lazy { GoogleSignIn.getClient(requireContext(), driveGso) }
+    private var pendingPdfUri: Uri? = null
+    private var pendingDriveFileName: String? = null
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -87,7 +109,56 @@ class HomeFragment : Fragment() {
         setupScanner()
         setupRecyclerView()
         fetchUserDetails()
-        fetchUserDocumentsFromSupabase()
+
+//        recyclerView.adapter = driveAdapter
+
+
+        loadDriveFiles()
+        driveAdapter = DriveFileAdapter(requireContext(), emptyList()) { file ->
+            downloadFileFromDrive(file.id, file.name)
+        }
+        recyclerView.adapter = driveAdapter
+
+        fetchUserDocumentsFromSupabase() // keep if you still list Supabase docs
+
+        // Register Drive sign-in result handler
+        googleDriveSignInLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+            try {
+                val account = task.getResult(ApiException::class.java)
+                if (account != null) {
+                    // Now upload the pending file
+                    val uri = pendingPdfUri
+                    val name = pendingDriveFileName
+                    if (uri != null && name != null) {
+                        lifecycleScope.launch(Dispatchers.IO) {
+                            try {
+                                val drive = DriveServiceHelper.buildService(requireContext(),
+                                    account.toString()
+                                )
+                                val id = GoogleDriveClient.uploadUri(drive, requireContext(), uri, "$name.pdf")
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(requireContext(), "Uploaded to Drive (id: $id)", Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (e: Exception) {
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(requireContext(), "Drive upload failed: ${e.message}", Toast.LENGTH_LONG).show()
+                                }
+                            } finally {
+                                pendingPdfUri = null
+                                pendingDriveFileName = null
+                            }
+                        }
+                    }
+                }
+            } catch (e: ApiException) {
+                Toast.makeText(requireContext(), "Google Sign-In cancelled/failed", Toast.LENGTH_SHORT).show()
+                pendingPdfUri = null
+                pendingDriveFileName = null
+            }
+        }
     }
 
     private fun initializeViews(view: View) {
@@ -95,7 +166,6 @@ class HomeFragment : Fragment() {
         profileImage = view.findViewById(R.id.profileImage_home)
 
         view.findViewById<ImageView>(R.id.iv_scan).setOnClickListener {
-            Log.d(TAG, "Scan button clicked")
             launchDocumentScanner()
         }
         profileImage.setOnClickListener {
@@ -104,6 +174,54 @@ class HomeFragment : Fragment() {
 
         setupOptionButtons(view)
     }
+
+    private fun loadDriveFiles() {
+        val account = GoogleSignIn.getLastSignedInAccount(requireContext())
+        if (account != null && GoogleSignIn.hasPermissions(account, Scope(DriveScopes.DRIVE_FILE))) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    val drive = DriveServiceHelper.buildService(requireContext(), account.email!!)
+                    val files = DriveServiceHelper.listFilesFromAppFolder(drive)
+                    withContext(Dispatchers.Main) {
+                        driveAdapter.updateFiles(files)
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(requireContext(), "Failed to load Drive files", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun downloadFileFromDrive(fileId: String, fileName: String) {
+        val account = GoogleSignIn.getLastSignedInAccount(requireContext()) ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val drive = DriveServiceHelper.buildService(requireContext(), account.email!!)
+
+                // Create app folder inside Downloads
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val appFolder = File(downloadsDir, "Docunova")
+                if (!appFolder.exists()) appFolder.mkdirs()
+
+                val outputFile = File(appFolder, fileName)
+
+                downloadFile(drive, fileId, outputFile)
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(requireContext(), "Downloaded to ${outputFile.absolutePath}", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(requireContext(), "Download failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+
+
 
     private fun setupOptionButtons(view: View) {
         val options = listOf(
@@ -132,6 +250,8 @@ class HomeFragment : Fragment() {
         }
     }
 
+
+
     private fun setupScanner() {
         scanner = GmsDocumentScanning.getClient(
             GmsDocumentScannerOptions.Builder()
@@ -147,10 +267,7 @@ class HomeFragment : Fragment() {
 
         scannerLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK) {
-                Log.d(TAG, "Scan result received")
                 handleScanResult(result.data)
-            } else {
-                Log.d(TAG, "Scan cancelled or failed")
             }
         }
     }
@@ -163,25 +280,21 @@ class HomeFragment : Fragment() {
                 val thumbnailUri = scanResult.pages?.firstOrNull()?.imageUri
 
                 if (pdfResult != null && thumbnailUri != null) {
-                    Log.d(TAG, "Valid scan result received")
                     promptFileNameAndSave(pdfResult.uri, thumbnailUri)
                 } else {
-                    Log.d(TAG, "Scan result is empty")
                     Toast.makeText(context, "Scan result is empty", Toast.LENGTH_SHORT).show()
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error handling scan result", e)
             Toast.makeText(context, "Error processing scan", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun promptFileNameAndSave(pdfUri: Uri, thumbnailUri: Uri) {
-        Log.d(TAG, "Prompting for file name")
-
         val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_filename_prompt, null).apply {
             findViewById<EditText>(R.id.filename_input).apply {
-                setText("Scan_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())}")
+                val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                setText("Scan_$ts")
                 setSelection(text.length)
             }
             startAnimation(AnimationUtils.loadAnimation(requireContext(), R.anim.dialog_fade_in))
@@ -191,347 +304,91 @@ class HomeFragment : Fragment() {
             .setView(dialogView)
             .setCancelable(false)
             .setPositiveButton("Save", null)
-            .setNegativeButton("Cancel") { d, _ ->
-                Log.d(TAG, "Save cancelled")
-                d.dismiss()
-            }
+            .setNegativeButton("Cancel") { d, _ -> d.dismiss() }
             .create()
 
         dialog.setOnShowListener {
             val saveButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
             saveButton.setOnClickListener {
-                val fileName = dialogView.findViewById<EditText>(R.id.filename_input).text.toString().trim()
-                when {
-                    fileName.isEmpty() -> {
-                        dialogView.findViewById<EditText>(R.id.filename_input).error = "File name cannot be empty"
-                        Log.d(TAG, "Empty file name entered")
-                    }
-                    else -> {
-                        Log.d(TAG, "Attempting to save file: $fileName")
-                        checkAndUploadFile(pdfUri, fileName, thumbnailUri, dialog)
-                    }
+                val input = dialogView.findViewById<EditText>(R.id.filename_input)
+                val fileName = input.text.toString().trim()
+                if (fileName.isEmpty()) {
+                    input.error = "File name cannot be empty"
+                    return@setOnClickListener
                 }
+
+                // === GOOGLE DRIVE UPLOAD ===
+                ensureDriveAccountThenUpload(pdfUri, fileName)
+
+                // === (OPTIONAL) SUPABASE UPLOAD ===
+                // If you want to keep Supabase storage too, uncomment:
+                // uploadToSupabaseStorage(pdfUri, fileName, thumbnailUri)
+
+                dialog.dismiss()
             }
         }
         dialog.show()
     }
 
-    private fun checkAndUploadFile(pdfUri: Uri, fileName: String, thumbnailUri: Uri, dialog: AlertDialog) {
-        Log.d(TAG, "Checking if file exists: $fileName")
+    /** Ensures user has Google account with Drive scope, then uploads the file */
+    private fun ensureDriveAccountThenUpload(pdfUri: Uri, fileName: String) {
+        pendingPdfUri = pdfUri
+        pendingDriveFileName = fileName
 
-        getUserIdAndToken()?.let { (userId, token) ->
-            val url = "$SUPABASE_STORAGE_URL/object/info/$BUCKET_NAME/$userId/$fileName.pdf"
+        val last = GoogleSignIn.getLastSignedInAccount(requireContext())
+        val hasDrive = last != null && GoogleSignIn.hasPermissions(last, Scope(DriveScopes.DRIVE_FILE))
+        if (hasDrive) {
+            // ✅ Upload directly using last.email instead of account
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    val drive = DriveServiceHelper.buildService(requireContext(), last!!.email!!)
+                    val id = DriveServiceHelper.uploadFileToAppFolder(drive, requireContext(), pdfUri, "$fileName.pdf")
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(requireContext(), "Uploaded to Drive", Toast.LENGTH_SHORT).show()
+                        loadDriveFiles() // refresh list
+                    }
 
-            val existsRequest = object : JsonObjectRequest(
-                Request.Method.GET, url, null,
-                { response ->
-                    Log.d(TAG, "File exists check response: $response")
-                    activity?.runOnUiThread {
-                        dialog.findViewById<EditText>(R.id.filename_input)?.error =
-                            "A file with this name already exists"
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(requireContext(), "Drive upload failed: ${e.message}", Toast.LENGTH_LONG).show()
                     }
-                },
-                { error ->
-                    Log.d(TAG, "File exists check error: ${error.networkResponse?.statusCode}")
-                    if (error.networkResponse?.statusCode == 404) {
-                        // File doesn't exist, proceed with upload
-                        activity?.runOnUiThread {
-                            dialog.dismiss()
-                            uploadToSupabaseStorage(pdfUri, fileName, thumbnailUri)
-                        }
-                    } else {
-                        activity?.runOnUiThread {
-                            Toast.makeText(context, "Error checking file existence", Toast.LENGTH_SHORT).show()
-                        }
-                    }
+                } finally {
+                    pendingPdfUri = null
+                    pendingDriveFileName = null
                 }
-            ) {
-                override fun getHeaders() = mapOf(
-                    "apikey" to SUPABASE_API_KEY,
-                    "Authorization" to "Bearer $token"
-                ).toMutableMap()
             }
-
-            Volley.newRequestQueue(requireContext()).add(existsRequest)
-        } ?: run {
-            Toast.makeText(context, "Not authenticated", Toast.LENGTH_SHORT).show()
-            dialog.dismiss()
+        } else {
+            // Ask user to pick/connect a Google account for Drive
+            googleDriveSignInLauncher.launch(driveSignInClient.signInIntent)
         }
     }
 
-    private fun uploadToSupabaseStorage(pdfUri: Uri, fileName: String, thumbnailUri: Uri) {
-        Log.d(TAG, "Starting upload for file: $fileName")
-
-        getUserIdAndToken()?.let { (userId, token) ->
-            try {
-                val inputStream = requireContext().contentResolver.openInputStream(pdfUri)
-                    ?: throw Exception("Failed to open PDF stream")
-
-                val pdfBytes = inputStream.use { it.readBytes() }
-                Log.d(TAG, "PDF size: ${pdfBytes.size} bytes")
-
-                val uploadRequest = object : StringRequest(
-                    Request.Method.POST,
-                    "$SUPABASE_STORAGE_URL/object/$BUCKET_NAME/$userId/$fileName.pdf",
-                    { response ->
-                        Log.d(TAG, "Upload successful: $response")
-                        saveFileToDatabase(fileName, thumbnailUri)
-                    },
-                    { error ->
-                        Log.e(TAG, "Upload failed: ${error.message}")
-                        activity?.runOnUiThread {
-                            Toast.makeText(context, "Failed to upload document", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                ) {
-                    override fun getHeaders(): MutableMap<String, String> {
-                        return hashMapOf(
-                            "apikey" to SUPABASE_API_KEY,
-                            "Authorization" to "Bearer $token",
-                            "Content-Type" to "application/pdf"
-                        )
-                    }
-
-                    override fun getBody(): ByteArray {
-                        return pdfBytes
-                    }
-                }
-
-                Volley.newRequestQueue(requireContext()).add(uploadRequest)
-                Log.d(TAG, "Upload request queued")
-
-            } catch (e: Exception) {
-                Log.e(TAG, "Error preparing upload: ${e.message}")
-                activity?.runOnUiThread {
-                    Toast.makeText(context, "Error preparing document for upload", Toast.LENGTH_SHORT).show()
-                }
-            }
-        } ?: run {
-            Toast.makeText(context, "Not authenticated", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun saveFileToDatabase(fileName: String, thumbnailUri: Uri) {
-        Log.d(TAG, "Saving file to database: $fileName")
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val recentFile = RecentFile(
-                    name = fileName,
-                    filePath = "", // We're not storing locally
-                    thumbnailUri = thumbnailUri.toString(),
-                    date = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date()),
-                    isSynced = true
-                )
-
-                db.recentFileDao().insert(recentFile)
-                Log.d(TAG, "File saved to database")
-
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "Document saved successfully", Toast.LENGTH_SHORT).show()
-                    fetchUserDocumentsFromSupabase()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Database save error: ${e.message}")
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "Failed to save document record", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-    }
 
     private fun setupRecyclerView() {
-        Log.d(TAG, "Setting up recycler view")
-
         recyclerView = requireView().findViewById<RecyclerView>(R.id.recentFilesRecycler).apply {
             layoutManager = LinearLayoutManager(requireContext())
             adapter = this@HomeFragment.adapter
         }
 
         db.recentFileDao().getAllFiles().observe(viewLifecycleOwner) { files ->
-            Log.d(TAG, "Updating adapter with ${files.size} files")
             adapter.updateFiles(files ?: emptyList())
         }
 
-        fetchUserDocumentsFromSupabase()
+        fetchUserDocumentsFromSupabase() // keep if listing Supabase docs
     }
 
-    private fun fetchUserDocumentsFromSupabase() {
-        Log.d(TAG, "Fetching user documents from Supabase")
-
-        getUserIdAndToken()?.let { (userId, token) ->
-            val url = "$SUPABASE_STORAGE_URL/object/list/$BUCKET_NAME?prefix=$userId/"
-
-            val request = object : JsonObjectRequest(
-                Request.Method.GET, url, null,
-                { response ->
-                    Log.d(TAG, "Documents fetch successful")
-                    handleDocumentsResponse(response)
-                },
-                { error ->
-                    Log.e(TAG, "Documents fetch failed: ${error.message}")
-                    activity?.runOnUiThread {
-                        Toast.makeText(context, "Failed to load documents", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            ) {
-                override fun getHeaders() = mapOf(
-                    "apikey" to SUPABASE_API_KEY,
-                    "Authorization" to "Bearer $token"
-                ).toMutableMap()
-            }
-
-            Volley.newRequestQueue(requireContext()).add(request)
-        } ?: run {
-            Log.d(TAG, "Not authenticated - skipping documents fetch")
-        }
-    }
-
-    private fun handleDocumentsResponse(response: JSONObject) {
-        try {
-            val documents = mutableListOf<RecentFile>()
-            val items = response.getJSONArray("data")
-            Log.d(TAG, "Found ${items.length()} documents")
-
-            for (i in 0 until items.length()) {
-                val item = items.getJSONObject(i)
-                documents.add(
-                    RecentFile(
-                        name = item.getString("name").substringAfterLast('/'),
-                        filePath = "",
-                        thumbnailUri = "",
-                        date = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
-                            .format(
-                                SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
-                                    .parse(item.getString("created_at")) ?: Date()
-                            ),
-                        isSynced = true
-                    )
-                )
-            }
-
-            lifecycleScope.launch(Dispatchers.Main) {
-                adapter.updateFiles(documents)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error parsing documents", e)
-            activity?.runOnUiThread {
-                Toast.makeText(context, "Error processing documents", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun openDocumentFromSupabase(file: RecentFile) {
-        Log.d(TAG, "Attempting to open document: ${file.name}")
-
-        getUserIdAndToken()?.let { (userId, _) ->
-            try {
-                val url = "$SUPABASE_STORAGE_URL/object/$BUCKET_NAME/$userId/${file.name}"
-                Log.d(TAG, "Document URL: $url")
-
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    data = Uri.parse(url)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-
-                if (intent.resolveActivity(requireContext().packageManager) == null) {
-                    intent.setDataAndType(Uri.parse(url), "application/pdf")
-                }
-
-                startActivity(intent)
-                Log.d(TAG, "Document opened successfully")
-            } catch (e: Exception) {
-                Log.e(TAG, "Error opening document", e)
-                Toast.makeText(context, "No app available to open PDF", Toast.LENGTH_SHORT).show()
-            }
-        } ?: run {
-            Toast.makeText(context, "Not authenticated", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun downloadDocument(file: RecentFile) {
-        Log.d(TAG, "Downloading document: ${file.name}")
-
-        getUserIdAndToken()?.let { (userId, token) ->
-            val url = "$SUPABASE_STORAGE_URL/object/$BUCKET_NAME/$userId/${file.name}"
-
-            val request = object : StringRequest(
-                Request.Method.GET, url,
-                { response ->
-                    Log.d(TAG, "Download successful")
-                    lifecycleScope.launch(Dispatchers.IO) {
-                        db.recentFileDao().updateFilePath(file.id, "remote:$url")
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(context, "Document ready to view", Toast.LENGTH_SHORT).show()
-                            openDocumentFromSupabase(file)
-                        }
-                    }
-                },
-                { error ->
-                    Log.e(TAG, "Download failed: ${error.message}")
-                    activity?.runOnUiThread {
-                        Toast.makeText(context, "Download failed", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            ) {
-                override fun getHeaders() = mapOf(
-                    "apikey" to SUPABASE_API_KEY,
-                    "Authorization" to "Bearer $token"
-                ).toMutableMap()
-            }
-
-            Volley.newRequestQueue(requireContext()).add(request)
-        } ?: run {
-            Toast.makeText(context, "Not authenticated", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun launchDocumentScanner() {
-        Log.d(TAG, "Launching document scanner")
-
-        scanner?.getStartScanIntent(requireActivity())
-            ?.addOnSuccessListener { intentSender ->
-                Log.d(TAG, "Scanner launched successfully")
-                scannerLauncher?.launch(IntentSenderRequest.Builder(intentSender).build())
-            }
-            ?.addOnFailureListener {
-                Log.e(TAG, "Scanner launch failed", it)
-                Toast.makeText(context, "Failed to start scanner", Toast.LENGTH_SHORT).show()
-            }
-    }
-
-    private fun animateSelection(view: View) {
-        view.animate()
-            .scaleX(1.05f)
-            .scaleY(1.05f)
-            .setDuration(150)
-            .withEndAction {
-                view.animate()
-                    .scaleX(1f)
-                    .scaleY(1f)
-                    .setDuration(100)
-                    .start()
-            }
-            .start()
-    }
+    // ------------------ Supabase user/profile + list (unchanged) ------------------
 
     private fun fetchUserDetails() {
-        Log.d(TAG, "Fetching user details")
-
         val prefs = requireContext().getSharedPreferences("MyAppPrefs", Context.MODE_PRIVATE)
         when (prefs.getString("login_method", null)) {
             "google" -> {
-                Log.d(TAG, "User logged in via Google")
                 displayGoogleUserInfo(prefs)
             }
             "email" -> {
-                Log.d(TAG, "User logged in via email")
                 fetchSupabaseUserInfo(prefs)
             }
-            else -> {
-                Log.d(TAG, "User not logged in")
-                showGuestUser()
-            }
+            else -> showGuestUser()
         }
     }
 
@@ -553,20 +410,12 @@ class HomeFragment : Fragment() {
 
     private fun fetchSupabaseUserInfo(prefs: android.content.SharedPreferences) {
         prefs.getString("access_token", null)?.let { token ->
-            Log.d(TAG, "Fetching user info from Supabase")
-
             val request = object : JsonObjectRequest(
                 Request.Method.GET,
                 "$SUPABASE_URL/auth/v1/user",
                 null,
-                { response ->
-                    Log.d(TAG, "User info fetch successful")
-                    handleUserResponse(response)
-                },
-                { error ->
-                    Log.e(TAG, "User info fetch failed", error)
-                    handleUserError(error)
-                }
+                { response -> handleUserResponse(response) },
+                { error -> handleUserError(error) }
             ) {
                 override fun getHeaders() = mapOf(
                     "apikey" to SUPABASE_API_KEY,
@@ -580,32 +429,23 @@ class HomeFragment : Fragment() {
     }
 
     private fun handleUserResponse(response: JSONObject) {
-        try {
-            val email = response.optString("email", "No Email")
-            val metadata = response.optJSONObject("user_metadata")
+        val email = response.optString("email", "No Email")
+        val metadata = response.optJSONObject("user_metadata")
 
-            tvUsername.text = email
+        tvUsername.text = email
 
-            metadata?.optString("avatar_url")?.takeIf { it.isNotEmpty() }?.let { url ->
-                Glide.with(this)
-                    .load(url)
-                    .placeholder(R.drawable.ic_profile)
-                    .into(profileImage)
-            } ?: profileImage.setImageResource(R.drawable.ic_profile)
-
-            Log.d(TAG, "User info displayed: $email")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error parsing user info", e)
-            Toast.makeText(context, "Error reading profile", Toast.LENGTH_SHORT).show()
-        }
+        metadata?.optString("avatar_url")?.takeIf { it.isNotEmpty() }?.let { url ->
+            Glide.with(this)
+                .load(url)
+                .placeholder(R.drawable.ic_profile)
+                .into(profileImage)
+        } ?: profileImage.setImageResource(R.drawable.ic_profile)
     }
 
     private fun handleUserError(error: com.android.volley.VolleyError) {
         if (error.networkResponse?.statusCode == 401) {
-            Log.d(TAG, "Session expired")
             showSessionExpired()
         } else {
-            Log.e(TAG, "User info fetch error", error)
             Toast.makeText(context, "Profile load failed", Toast.LENGTH_SHORT).show()
         }
     }
@@ -626,13 +466,119 @@ class HomeFragment : Fragment() {
         val prefs = requireContext().getSharedPreferences("MyAppPrefs", Context.MODE_PRIVATE)
         val userId = prefs.getString("user_id", null)
         val token = prefs.getString("access_token", null)
+        return if (userId != null && token != null) userId to token else null
+    }
 
-        return if (userId != null && token != null) {
-            Log.d(TAG, "User authenticated: $userId")
-            userId to token
-        } else {
-            Log.d(TAG, "User not authenticated")
-            null
+    // ------------------ Supabase storage (optional; keep if you still use it) -----
+
+    private fun fetchUserDocumentsFromSupabase() {
+        getUserIdAndToken()?.let { (userId, token) ->
+            val url = "$SUPABASE_STORAGE_URL/object/list/$BUCKET_NAME?prefix=$userId/"
+
+            val request = object : JsonObjectRequest(
+                Request.Method.GET, url, null,
+                { response -> handleDocumentsResponse(response) },
+                { _ -> Toast.makeText(context, "Failed to load documents", Toast.LENGTH_SHORT).show() }
+            ) {
+                override fun getHeaders() = mapOf(
+                    "apikey" to SUPABASE_API_KEY,
+                    "Authorization" to "Bearer $token"
+                ).toMutableMap()
+            }
+
+            Volley.newRequestQueue(requireContext()).add(request)
         }
+    }
+
+    private fun handleDocumentsResponse(response: JSONObject) {
+        try {
+            val documents = mutableListOf<RecentFile>()
+            val items = response.getJSONArray("data")
+
+            for (i in 0 until items.length()) {
+                val item = items.getJSONObject(i)
+                documents.add(
+                    RecentFile(
+                        name = item.getString("name").substringAfterLast('/'),
+                        filePath = "",
+                        thumbnailUri = "",
+                        date = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
+                            .format(
+                                SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+                                    .parse(item.getString("created_at")) ?: Date()
+                            ),
+                        isSynced = true
+                    )
+                )
+            }
+
+            lifecycleScope.launch(Dispatchers.Main) {
+                adapter.updateFiles(documents)
+            }
+        } catch (_: Exception) {
+            Toast.makeText(context, "Error processing documents", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun openDocumentFromSupabase(file: RecentFile) {
+        getUserIdAndToken()?.let { (userId, _) ->
+            val url = "$SUPABASE_STORAGE_URL/object/$BUCKET_NAME/$userId/${file.name}"
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                data = Uri.parse(url)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            if (intent.resolveActivity(requireContext().packageManager) == null) {
+                intent.setDataAndType(Uri.parse(url), "application/pdf")
+            }
+            startActivity(intent)
+        }
+    }
+
+    private fun downloadDocument(file: RecentFile) {
+        getUserIdAndToken()?.let { (userId, token) ->
+            val url = "$SUPABASE_STORAGE_URL/object/$BUCKET_NAME/$userId/${file.name}"
+
+            val request = object : StringRequest(
+                Request.Method.GET, url,
+                { _ ->
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        db.recentFileDao().updateFilePath(file.id, "remote:$url")
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "Document ready to view", Toast.LENGTH_SHORT).show()
+                            openDocumentFromSupabase(file)
+                        }
+                    }
+                },
+                { _ -> Toast.makeText(context, "Download failed", Toast.LENGTH_SHORT).show() }
+            ) {
+                override fun getHeaders() = mapOf(
+                    "apikey" to SUPABASE_API_KEY,
+                    "Authorization" to "Bearer $token"
+                ).toMutableMap()
+            }
+
+            Volley.newRequestQueue(requireContext()).add(request)
+        }
+    }
+
+    private fun launchDocumentScanner() {
+        scanner?.getStartScanIntent(requireActivity())
+            ?.addOnSuccessListener { intentSender ->
+                scannerLauncher?.launch(IntentSenderRequest.Builder(intentSender).build())
+            }
+            ?.addOnFailureListener {
+                Toast.makeText(context, "Failed to start scanner", Toast.LENGTH_SHORT).show()
+            }
+    }
+
+    private fun animateSelection(view: View) {
+        view.animate()
+            .scaleX(1.05f)
+            .scaleY(1.05f)
+            .setDuration(150)
+            .withEndAction {
+                view.animate().scaleX(1f).scaleY(1f).setDuration(100).start()
+            }
+            .start()
     }
 }

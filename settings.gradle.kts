@@ -1,13 +1,7 @@
 pluginManagement {
     repositories {
-        google {
-            content {
-                includeGroupByRegex("com\\.android.*")
-                includeGroupByRegex("com\\.google.*")
-                includeGroupByRegex("androidx.*")
-            }
-        }
-        mavenCentral()
+        google()
+        mavenCentral() // <-- Must be here
         gradlePluginPortal()
     }
 }
@@ -15,17 +9,9 @@ dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         google()
-        mavenCentral()
+        mavenCentral() // <-- This is the most important line for your error
     }
-
-        repositories {
-            google()
-            mavenCentral()
-            maven(url = "https://jitpack.io") // 👈 Add this line
-        }
-
-
 }
-
 rootProject.name = "Docunova"
 include(":app")
+

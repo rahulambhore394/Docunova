@@ -13,6 +13,8 @@ import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.Scope
+import com.google.api.services.drive.DriveScopes
 import org.json.JSONException
 import org.json.JSONObject
 
@@ -47,10 +49,11 @@ class LoginActivity : AppCompatActivity() {
         val continueWithGoogle = findViewById<LinearLayout>(R.id.btn_continueWithGoogle)
         val createAccountText = findViewById<TextView>(R.id.createAccount)
 
-        // Google Sign-In config
+        // Google Sign-In config (now with Drive scope)
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
             .requestProfile()
+            .requestScopes(Scope(DriveScopes.DRIVE_FILE))
             .build()
         googleSignInClient = GoogleSignIn.getClient(this, gso)
 
@@ -95,7 +98,6 @@ class LoginActivity : AppCompatActivity() {
                     val fullName = userMetadata?.optString("full_name", email) ?: email
                     val avatarUrl = userMetadata?.optString("avatar_url", "")
 
-                    // ✅ Save consistent keys for both login methods
                     val prefs = getSharedPreferences("MyAppPrefs", MODE_PRIVATE)
                     prefs.edit()
                         .putString("access_token", accessToken)
@@ -154,7 +156,6 @@ class LoginActivity : AppCompatActivity() {
 
     private fun handleGoogleSignIn(account: GoogleSignInAccount?) {
         if (account != null) {
-            // ✅ Save consistent keys
             val prefs = getSharedPreferences("MyAppPrefs", MODE_PRIVATE)
             prefs.edit()
                 .putString("google_full_name", account.displayName ?: "Google User")
