@@ -24,6 +24,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.android.volley.Request
 import com.android.volley.toolbox.JsonObjectRequest
 import com.android.volley.toolbox.StringRequest
@@ -66,8 +67,6 @@ class HomeFragment : Fragment() {
     private lateinit var tvTotalFiles: TextView
     private lateinit var tvTotalSize: TextView
 
-
-
     private var scanner: GmsDocumentScanner? = null
     private var scannerLauncher: ActivityResultLauncher<IntentSenderRequest>? = null
 
@@ -85,6 +84,7 @@ class HomeFragment : Fragment() {
 
     private lateinit var tvUsername: TextView
     private lateinit var profileImage: ImageView
+    private lateinit var swipeRefreshLayout: SwipeRefreshLayout
 
     // --- Google Drive sign-in for email-login users or missing permission
     private lateinit var googleDriveSignInLauncher: ActivityResultLauncher<Intent>
@@ -110,6 +110,7 @@ class HomeFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
         tvTotalFiles = view.findViewById(R.id.tv_scanned_files_count)
         tvTotalSize = view.findViewById(R.id.tv_drive_size)
+        swipeRefreshLayout = view.findViewById(R.id.swipeRefresh)
 
         db = AppDatabase.getDatabase(requireContext())
         initializeViews(view)
@@ -117,16 +118,15 @@ class HomeFragment : Fragment() {
         setupRecyclerView()
         fetchUserDetails()
 
-//        recyclerView.adapter = driveAdapter
-
-
         loadDriveFiles()
         driveAdapter = DriveFileAdapter(requireContext(), emptyList()) { file ->
             downloadFileFromDrive(file.id, file.name)
         }
         recyclerView.adapter = driveAdapter
 
-        fetchUserDocumentsFromSupabase() // keep if you still list Supabase docs
+        fetchUserDocumentsFromSupabase()
+
+        setupSwipeRefresh()
 
         // Register Drive sign-in result handler
         googleDriveSignInLauncher = registerForActivityResult(
@@ -136,7 +136,6 @@ class HomeFragment : Fragment() {
             try {
                 val account = task.getResult(ApiException::class.java)
                 if (account != null) {
-                    // Now upload the pending file
                     val uri = pendingPdfUri
                     val name = pendingDriveFileName
                     if (uri != null && name != null) {
@@ -168,6 +167,17 @@ class HomeFragment : Fragment() {
         }
     }
 
+    /** ✅ Added SwipeRefresh functionality */
+    private fun setupSwipeRefresh() {
+        swipeRefreshLayout.setOnRefreshListener {
+            lifecycleScope.launch {
+                loadDriveFiles()
+                fetchUserDocumentsFromSupabase()
+                swipeRefreshLayout.isRefreshing = false
+            }
+        }
+    }
+
     private fun initializeViews(view: View) {
         tvUsername = view.findViewById(R.id.tv_Username)
         profileImage = view.findViewById(R.id.profileImage_home)
@@ -190,17 +200,19 @@ class HomeFragment : Fragment() {
                     val drive = DriveServiceHelper.buildService(requireContext(), account.email!!)
                     val files = DriveServiceHelper.listFilesFromAppFolder(drive)
 
-                    // Calculate total files and size
                     var totalSize: Long = 0
                     for (file in files) {
-                        totalSize += file.size ?: 0
+                        file.size.toString().toLongOrNull()?.let {
+                            totalSize += it
+                        }
                     }
+
 
                     val sizeFormatted = formatFileSize(totalSize)
                     withContext(Dispatchers.Main) {
                         driveAdapter.updateFiles(files)
                         tvTotalFiles.text = "${files.size}"
-                        tvTotalSize.text = "$sizeFormatted"
+                        tvTotalSize.text = sizeFormatted
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
@@ -210,6 +222,7 @@ class HomeFragment : Fragment() {
             }
         }
     }
+
     private fun formatFileSize(size: Long): String {
         if (size <= 0) return "0 B"
         val units = arrayOf("B", "KB", "MB", "GB", "TB")
@@ -225,7 +238,7 @@ class HomeFragment : Fragment() {
 
 
 
-    private fun downloadFileFromDrive(fileId: String, fileName: String) {
+private fun downloadFileFromDrive(fileId: String, fileName: String) {
         val account = GoogleSignIn.getLastSignedInAccount(requireContext()) ?: return
         lifecycleScope.launch(Dispatchers.IO) {
             try {
