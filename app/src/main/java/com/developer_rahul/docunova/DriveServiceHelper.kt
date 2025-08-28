@@ -30,7 +30,7 @@ object DriveServiceHelper {
     /** Create or return "DocuNova" app folder */
     suspend fun getOrCreateAppFolder(drive: Drive): String = withContext(Dispatchers.IO) {
         val folderName = "DocuNova"
-        val query = "mimeType='application/vnd.google-apps.folder' and name='$folderName' and trashed=false"
+        val query = "mimeType='application/vnd.google-apps.folder' and name='$folderName' and 'root' in parents and trashed=false"
         val result = drive.files().list().setQ(query).setSpaces("drive").execute()
 
         if (result.files.isNotEmpty()) {
@@ -56,7 +56,9 @@ object DriveServiceHelper {
             }
 
             val inputStream = context.contentResolver.openInputStream(uri)
-            val mediaContent = InputStreamContent("application/pdf", inputStream)
+            val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
+            val mediaContent = InputStreamContent(mimeType, inputStream)
+
 
             val file = drive.files().create(fileMetadata, mediaContent).setFields("id").execute()
             file.id
@@ -68,14 +70,14 @@ object DriveServiceHelper {
         val query = "'$folderId' in parents and trashed=false"
         val result = drive.files().list()
             .setQ(query)
-            .setFields("files(id, name, mimeType, size, thumbnailLink)")
+            .setFields("files(id, name, mimeType, size, thumbnailLink, createdTime)")
             .execute()
         result.files.map {
             DriveFileModel(
                 id = it.id,
                 name = it.name,
                 mimeType = it.mimeType,
-                size = it.size?.toString() ?: "Unknown",
+                size = it.size ?: 0,
                 thumbnailLink = it.thumbnailLink ?: ""
             )
         }
@@ -84,6 +86,7 @@ object DriveServiceHelper {
     fun downloadFile(driveService: Drive, fileId: String, outputFile: java.io.File) {
         FileOutputStream(outputFile).use { outputStream: FileOutputStream ->
             driveService.files().get(fileId).executeMediaAndDownloadTo(outputStream)
+
         }
     }
 

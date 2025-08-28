@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.text.format.Formatter.formatFileSize
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
@@ -62,6 +63,10 @@ class HomeFragment : Fragment() {
     private val BUCKET_NAME = "user-documents"
     private lateinit var driveAdapter: DriveFileAdapter
 
+    private lateinit var tvTotalFiles: TextView
+    private lateinit var tvTotalSize: TextView
+
+
 
     private var scanner: GmsDocumentScanner? = null
     private var scannerLauncher: ActivityResultLauncher<IntentSenderRequest>? = null
@@ -103,6 +108,8 @@ class HomeFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        tvTotalFiles = view.findViewById(R.id.tv_scanned_files_count)
+        tvTotalSize = view.findViewById(R.id.tv_drive_size)
 
         db = AppDatabase.getDatabase(requireContext())
         initializeViews(view)
@@ -182,8 +189,18 @@ class HomeFragment : Fragment() {
                 try {
                     val drive = DriveServiceHelper.buildService(requireContext(), account.email!!)
                     val files = DriveServiceHelper.listFilesFromAppFolder(drive)
+
+                    // Calculate total files and size
+                    var totalSize: Long = 0
+                    for (file in files) {
+                        totalSize += file.size ?: 0
+                    }
+
+                    val sizeFormatted = formatFileSize(totalSize)
                     withContext(Dispatchers.Main) {
                         driveAdapter.updateFiles(files)
+                        tvTotalFiles.text = "${files.size}"
+                        tvTotalSize.text = "$sizeFormatted"
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
@@ -193,6 +210,20 @@ class HomeFragment : Fragment() {
             }
         }
     }
+    private fun formatFileSize(size: Long): String {
+        if (size <= 0) return "0 B"
+        val units = arrayOf("B", "KB", "MB", "GB", "TB")
+        var newSize = size.toDouble()
+        var unitIndex = 0
+        while (newSize >= 1024 && unitIndex < units.size - 1) {
+            newSize /= 1024
+            unitIndex++
+        }
+        return String.format("%.2f %s", newSize, units[unitIndex])
+    }
+
+
+
 
     private fun downloadFileFromDrive(fileId: String, fileName: String) {
         val account = GoogleSignIn.getLastSignedInAccount(requireContext()) ?: return

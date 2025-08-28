@@ -7,11 +7,15 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.database.Cursor
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -22,22 +26,33 @@ import android.text.style.LeadingMarginSpan
 import android.text.style.RelativeSizeSpan
 import android.text.style.StyleSpan
 import android.util.Log
+import android.util.TypedValue
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.AnimationUtils
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.graphics.ColorUtils
+import androidx.core.view.ViewCompat
 import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
+import com.developer_rahul.docunova.DriveServiceHelper
 import com.developer_rahul.docunova.R
 import com.developer_rahul.docunova.ProcessingDialog
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.Scope
+import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
+import com.google.api.services.drive.Drive
+import com.google.api.services.drive.DriveScopes
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
@@ -49,7 +64,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import org.apache.poi.xwpf.usermodel.XWPFDocument
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
@@ -80,10 +98,18 @@ class TypoProcessingActivity : AppCompatActivity() {
     private var currentExtractionJob: Job? = null
     private val isProcessing = AtomicBoolean(false)
 
+    // Google Drive Integration
+    private lateinit var driveSignInOptions: GoogleSignInOptions
+    private var driveService: Drive? = null
+    private var pendingFileName: String? = null
+    private var pendingFileBytes: ByteArray? = null
+    private var selectedFormat: String = "PDF"
+
     companion object {
         private const val TAG = "TypoProcessingActivity"
         const val REQUEST_DOCUMENT = 101
         const val REQUEST_STORAGE_PERMISSION = 102
+        const val REQUEST_DRIVE_SIGN_IN = 2001
         private const val MAX_IMAGE_DIMENSION = 1000
         private const val MAX_RECENT_IMAGES = 16
         private const val INDENT_PER_LEVEL = 30
@@ -113,12 +139,49 @@ class TypoProcessingActivity : AppCompatActivity() {
         }
     }
 
+    private val documentPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            result.data?.data?.let { uri ->
+                val mimeType = contentResolver.getType(uri)
+                showConvertLayout(uri, mimeType)
+            }
+        }
+    }
+
+    private val driveSignInLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            initializeDriveService()
+            uploadFileToDrive()
+        } else {
+            Toast.makeText(this, "Google Drive sign-in failed", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_text_extraction)
         processingDialog = ProcessingDialog(this)
         container = findViewById(R.id.container)
+
+        // Initialize Google Drive
+        driveSignInOptions = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestScopes(Scope(DriveScopes.DRIVE_FILE))
+            .build()
+
+        initializeDriveService()
         showUploadLayout()
+    }
+
+    private fun initializeDriveService() {
+        val account = GoogleSignIn.getLastSignedInAccount(this)
+        account?.let {
+            driveService = DriveServiceHelper.buildService(this, account.email ?: "")
+        }
     }
 
     override fun onDestroy() {
@@ -291,7 +354,8 @@ class TypoProcessingActivity : AppCompatActivity() {
         private val onItemClick: (Uri) -> Unit
     ) : RecyclerView.Adapter<RecentImagesAdapter.ViewHolder>() {
 
-        inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView)
+        {
             val imageView: ImageView = itemView.findViewById(R.id.imageView)
         }
 
@@ -325,8 +389,6 @@ class TypoProcessingActivity : AppCompatActivity() {
         fileNameTextView = convertView.findViewById(R.id.editTextDocumentName)
         extractedTextEditText = convertView.findViewById(R.id.editTextExtractedText)
         copyButton = convertView.findViewById(R.id.btnCopyText)
-        generatePdfButton = convertView.findViewById(R.id.btnConvertToPDF)
-        generateWordButton = convertView.findViewById(R.id.btnConvertToWord)
         formatButton = convertView.findViewById(R.id.btnFormatText)
         saveButton = convertView.findViewById(R.id.btnSave)
 
@@ -343,8 +405,6 @@ class TypoProcessingActivity : AppCompatActivity() {
 
         // Set up button listeners
         copyButton.setOnClickListener { copyTextToClipboard() }
-        generatePdfButton.setOnClickListener { generatePdfFromExtractedText() }
-        generateWordButton.setOnClickListener { generateWordFromExtractedText() }
         formatButton.setOnClickListener { formatExtractedText() }
         saveButton.setOnClickListener { saveEditedText() }
 
@@ -404,7 +464,11 @@ class TypoProcessingActivity : AppCompatActivity() {
         }
     }
 
-    private fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
+    private fun calculateInSampleSize(
+        options: BitmapFactory.Options,
+        reqWidth: Int,
+        reqHeight: Int
+    ): Int {
         val (height: Int, width: Int) = options.run { outHeight to outWidth }
         var inSampleSize = 1
 
@@ -559,78 +623,6 @@ class TypoProcessingActivity : AppCompatActivity() {
         val clip = ClipData.newPlainText("Extracted text", text)
         clipboard.setPrimaryClip(clip)
         Toast.makeText(this, "Text copied to clipboard", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun generatePdfFromExtractedText() {
-        val text = extractedTextEditText.text.toString()
-        if (text.isBlank()) {
-            Toast.makeText(this, "No text to generate PDF", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        processingDialog.show(message = "Generating PDF...")
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val fileName = "$originalFileName.pdf"
-                val pdfFile = PdfGenerator.generatePdfFromText(
-                    this@TypoProcessingActivity,
-                    text,
-                    fileName
-                )
-
-                withContext(Dispatchers.Main) {
-                    processingDialog.dismiss()
-                    Toast.makeText(
-                        this@TypoProcessingActivity,
-                        "PDF generated: ${pdfFile.name}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    openFile(pdfFile, "application/pdf")
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    processingDialog.dismiss()
-                    showError("Failed to generate PDF: ${e.message}")
-                }
-            }
-        }
-    }
-
-    private fun generateWordFromExtractedText() {
-        val text = extractedTextEditText.text.toString()
-        if (text.isBlank()) {
-            Toast.makeText(this, "No text to generate Word document", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        processingDialog.show(message = "Generating Word document...")
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val fileName = "$originalFileName.docx"
-                val wordFile = WordGenerator.generateDocxFile(
-                    this@TypoProcessingActivity,
-                    text,
-                    fileName
-                )
-
-                withContext(Dispatchers.Main) {
-                    processingDialog.dismiss()
-                    Toast.makeText(
-                        this@TypoProcessingActivity,
-                        "Word document generated: ${wordFile.name}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    openFile(wordFile, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    processingDialog.dismiss()
-                    showError("Failed to generate Word document: ${e.message}")
-                }
-            }
-        }
     }
 
     private fun formatExtractedText() {
@@ -812,30 +804,290 @@ class TypoProcessingActivity : AppCompatActivity() {
             return
         }
 
-        processingDialog.show(message = "Saving text...")
+        // Show filename prompt for Google Drive upload instead of saving locally
+        promptFileNameAndSave()
+    }
+
+    /** Prompt filename and upload to Google Drive */
+    private fun promptFileNameAndSave() {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_filename_prompt, null).apply {
+            findViewById<EditText>(R.id.filename_input).apply {
+                val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                setText("Scan_$ts")
+                setSelection(text.length)
+            }
+            startAnimation(AnimationUtils.loadAnimation(this@TypoProcessingActivity, R.anim.dialog_fade_in))
+        }
+
+        val dialog = AlertDialog.Builder(this, R.style.CustomAlertDialogTheme)
+            .setView(dialogView)
+            .setCancelable(false)
+            .setPositiveButton("Next", null)
+            .setNegativeButton("Cancel") { d, _ -> d.dismiss() }
+            .create()
+
+        dialog.setOnShowListener {
+            val nextButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            nextButton.setOnClickListener {
+                val input = dialogView.findViewById<EditText>(R.id.filename_input)
+                val fileName = input.text.toString().trim()
+                if (fileName.isEmpty()) {
+                    input.error = "File name cannot be empty"
+                    return@setOnClickListener
+                }
+
+                pendingFileName = fileName
+                dialog.dismiss()
+                showFormatSelectionDialog()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun showFormatSelectionDialog() {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_format_selection, null)
+        val dialog = AlertDialog.Builder(this, R.style.CustomAlertDialogTheme)
+            .setView(dialogView)
+            .setTitle("Select File Format")
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        val pdfOption = dialogView.findViewById<LinearLayout>(R.id.option_pdf)
+        val wordOption = dialogView.findViewById<LinearLayout>(R.id.option_word)
+        val textOption = dialogView.findViewById<LinearLayout>(R.id.option_text)
+
+        val pdfIcon = dialogView.findViewById<ImageView>(R.id.icon_pdf)
+        val wordIcon = dialogView.findViewById<ImageView>(R.id.icon_word)
+        val textIcon = dialogView.findViewById<ImageView>(R.id.icon_text)
+
+        val pdfText = dialogView.findViewById<TextView>(R.id.text_pdf)
+        val wordText = dialogView.findViewById<TextView>(R.id.text_word)
+        val textText = dialogView.findViewById<TextView>(R.id.text_text)
+
+        // Set initial selection
+        updateSelectionUI(pdfOption, pdfIcon, pdfText, true, R.color.pdf_color)
+        selectedFormat = "PDF"
+
+        pdfOption.setOnClickListener {
+            updateSelectionUI(pdfOption, pdfIcon, pdfText, true, R.color.pdf_color)
+            updateSelectionUI(wordOption, wordIcon, wordText, false, R.color.word_color)
+            updateSelectionUI(textOption, textIcon, textText, false, R.color.text_color)
+            selectedFormat = "PDF"
+        }
+
+        wordOption.setOnClickListener {
+            updateSelectionUI(pdfOption, pdfIcon, pdfText, false, R.color.pdf_color)
+            updateSelectionUI(wordOption, wordIcon, wordText, true, R.color.word_color)
+            updateSelectionUI(textOption, textIcon, textText, false, R.color.text_color)
+            selectedFormat = "WORD"
+        }
+
+        textOption.setOnClickListener {
+            updateSelectionUI(pdfOption, pdfIcon, pdfText, false, R.color.pdf_color)
+            updateSelectionUI(wordOption, wordIcon, wordText, false, R.color.word_color)
+            updateSelectionUI(textOption, textIcon, textText, true, R.color.text_color)
+            selectedFormat = "TEXT"
+        }
+
+        dialogView.findViewById<Button>(R.id.btn_confirm).setOnClickListener {
+            prepareFileForUpload()
+            dialog.dismiss()
+        }
+
+        dialog.show()
+    }
+
+    private fun updateSelectionUI(
+        container: LinearLayout,
+        icon: ImageView,
+        text: TextView,
+        isSelected: Boolean,
+        colorRes: Int
+    ) {
+        val context = container.context
+        val color = ContextCompat.getColor(context, colorRes)
+        val cornerRadius = resources.getDimension(com.google.android.material.R.dimen.mtrl_shape_corner_size_medium_component)
+
+        val drawable = GradientDrawable()
+        drawable.cornerRadius = cornerRadius
+
+        if (isSelected) {
+            val lightColor = ColorUtils.blendARGB(color, Color.WHITE, 0.7f)
+            drawable.setColor(lightColor)
+            drawable.setStroke(2, color)
+
+            icon.setColorFilter(color)
+            text.setTextColor(color)
+
+            ViewCompat.setElevation(container, 8f)
+        } else {
+            drawable.setColor(ContextCompat.getColor(context, R.color.colorSurface))
+            drawable.setStroke(1, ContextCompat.getColor(context, R.color.outline_light))
+
+            icon.setColorFilter(ContextCompat.getColor(context, R.color.gray_600))
+            text.setTextColor(ContextCompat.getColor(context, R.color.gray_600))
+
+            ViewCompat.setElevation(container, 0f)
+        }
+
+        // Apply with ripple
+        val ripple = RippleDrawable(
+            ColorStateList.valueOf(ContextCompat.getColor(context, R.color.ripple_effect_color)),
+            drawable,
+            null
+        )
+        container.background = ripple
+    }
+
+    /** Prepare file bytes and ensure sign-in */
+    private fun prepareFileForUpload() {
+        val text = extractedTextEditText.text.toString()
+        if (text.isBlank()) {
+            Toast.makeText(this, "No text to save", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        processingDialog.show(message = "Preparing file...")
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val fileName = "$originalFileName.txt"
-                val folder = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Docunova")
-                if (!folder.exists()) folder.mkdirs()
+                val fileBytes = when (selectedFormat) {
+                    "PDF" -> createPdfFile(text)
+                    "WORD" -> createWordFile(text)
+                    else -> createTextFile(text)
+                }
 
-                val textFile = File(folder, fileName)
-                textFile.writeText(text)
+                withContext(Dispatchers.Main) {
+                    pendingFileBytes = fileBytes
+                    ensureDriveAccountThenUpload()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    processingDialog.dismiss()
+                    Toast.makeText(
+                        this@TypoProcessingActivity,
+                        "Error preparing file: ${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private fun createPdfFile(text: String): ByteArray {
+        val pdfDocument = android.graphics.pdf.PdfDocument()
+        val pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(595, 842, 1).create()
+        val page = pdfDocument.startPage(pageInfo)
+        val canvas = page.canvas
+        val paint = android.graphics.Paint().apply {
+            color = android.graphics.Color.BLACK
+            textSize = 12f
+        }
+
+        var y = 25f
+        val lines = text.split("\n")
+        for (line in lines) {
+            canvas.drawText(line, 10f, y, paint)
+            y += paint.descent() - paint.ascent()
+        }
+
+        pdfDocument.finishPage(page)
+        val stream = ByteArrayOutputStream()
+        pdfDocument.writeTo(stream)
+        pdfDocument.close()
+        return stream.toByteArray()
+    }
+
+    private fun createWordFile(text: String): ByteArray {
+        val doc = XWPFDocument()
+        val paragraph = doc.createParagraph()
+        val run = paragraph.createRun()
+        run.setText(text)
+
+        val stream = ByteArrayOutputStream()
+        doc.write(stream)
+        doc.close()
+        return stream.toByteArray()
+    }
+
+    private fun createTextFile(text: String): ByteArray {
+        return text.toByteArray()
+    }
+
+    /** Check Google sign-in and upload */
+    private fun ensureDriveAccountThenUpload() {
+        val last = GoogleSignIn.getLastSignedInAccount(this)
+        val hasDrive = last != null && GoogleSignIn.hasPermissions(last, Scope(DriveScopes.DRIVE_FILE))
+
+        if (hasDrive) {
+            uploadFileToDrive()
+        } else {
+            val signInIntent = GoogleSignIn.getClient(this, driveSignInOptions).signInIntent
+            driveSignInLauncher.launch(signInIntent)
+        }
+    }
+
+    /** Upload using DriveServiceHelper */
+    private fun uploadFileToDrive() {
+        if (pendingFileBytes == null || pendingFileName == null) {
+            Toast.makeText(this, "No file to upload", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val driveService = driveService ?: run {
+            Toast.makeText(this, "Drive service not initialized", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // Show processing dialog on UI thread
+        runOnUiThread {
+            processingDialog.show(message = "Uploading to Google Drive...")
+        }
+
+        val fileExtension = when (selectedFormat) {
+            "PDF" -> ".pdf"
+            "WORD" -> ".docx"
+            else -> ".txt"
+        }
+        val fileName = "${pendingFileName}$fileExtension"
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // Save the file to a temporary location
+                val tempFile = File(cacheDir, fileName)
+                FileOutputStream(tempFile).use { fos ->
+                    fos.write(pendingFileBytes!!)
+                }
+
+                // Upload the file using DriveServiceHelper
+                val fileId = DriveServiceHelper.uploadFileToAppFolder(
+                    driveService,
+                    this@TypoProcessingActivity,
+                    Uri.fromFile(tempFile),
+                    fileName
+                )
 
                 withContext(Dispatchers.Main) {
                     processingDialog.dismiss()
                     Toast.makeText(
                         this@TypoProcessingActivity,
-                        "Text saved: ${textFile.name}",
+                        "File uploaded successfully to Google Drive!",
                         Toast.LENGTH_LONG
                     ).show()
-                    openFile(textFile, "text/plain")
+                    Log.d("DriveUpload", "File uploaded with ID: $fileId")
+
+                    // Clean up the temporary file
+                    tempFile.delete()
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     processingDialog.dismiss()
-                    showError("Failed to save text: ${e.message}")
+                    Toast.makeText(
+                        this@TypoProcessingActivity,
+                        "Upload failed: ${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    Log.e("DriveUpload", "Error uploading file", e)
                 }
             }
         }
@@ -913,8 +1165,6 @@ class TypoProcessingActivity : AppCompatActivity() {
             }
         }
     }
-
-    @Throws(IOException::class)
     private fun createImageFile(): File {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val storageDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES)
@@ -946,7 +1196,6 @@ class TypoProcessingActivity : AppCompatActivity() {
     private fun showError(message: String) {
         runOnUiThread {
             Log.e(TAG, message)
-
             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         }
     }

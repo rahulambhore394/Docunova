@@ -3,41 +3,48 @@ package com.developer_rahul.docunova.Fragments.Home
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Color
-import android.graphics.Matrix
-import android.graphics.PorterDuff
-import android.graphics.Typeface
+import android.graphics.*
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import android.view.LayoutInflater
 import android.view.View
+import android.view.animation.AnimationUtils
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.lifecycleScope
+import com.developer_rahul.docunova.DriveServiceHelper
 import com.developer_rahul.docunova.R
 import com.developer_rahul.docunova.ProcessingDialog
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.Scope
+import com.google.android.material.button.MaterialButton
+import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
+import com.google.api.services.drive.Drive
+import com.google.api.services.drive.DriveScopes
 import com.google.mlkit.common.model.DownloadConditions
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.Translator
 import com.google.mlkit.nl.translate.TranslatorOptions
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.google.android.material.button.MaterialButtonToggleGroup
+import kotlinx.coroutines.*
 import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.withContext
+import org.apache.poi.xwpf.usermodel.XWPFDocument
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
@@ -51,6 +58,8 @@ class TranslationActivity : AppCompatActivity() {
     private lateinit var textViewTranslatedContent: EditText
     private lateinit var processingDialog: ProcessingDialog
     private lateinit var textRecognizer: com.google.mlkit.vision.text.TextRecognizer
+    private lateinit var formatToggleGroup: MaterialButtonToggleGroup
+    private lateinit var btnSaveFile: Button
 
     private var extractedText = ""
     private var selectedFileUri: Uri? = null
@@ -58,8 +67,25 @@ class TranslationActivity : AppCompatActivity() {
     private var translator: Translator? = null
     private var currentPhotoPath: String? = null
     private var currentExtractionJob: Job? = null
+    private var selectedFormat: String = "PDF"
 
-    private val languages = listOf("Select Language", "Hindi", "Marathi", "Spanish", "French", "German", "Tamil", "Gujarati", "Kannada", "Bengali", "Punjabi")
+    // Google Drive Pending Info
+    private var pendingFileName: String? = null
+    private var pendingFileBytes: ByteArray? = null
+    private lateinit var driveSignInOptions: GoogleSignInOptions
+    private var driveService: Drive? = null
+
+    companion object {
+        private const val REQUEST_DOCUMENT = 101
+        private const val REQUEST_DRIVE_SIGN_IN = 2001
+        private const val MAX_IMAGE_DIMENSION = 1000
+    }
+
+    private val languages = listOf(
+        "Select Language", "Hindi", "Marathi", "Spanish", "French",
+        "German", "Tamil", "Gujarati", "Kannada", "Bengali", "Punjabi"
+    )
+
     private val languageCodes = mapOf(
         "Hindi" to "hi",
         "Marathi" to "mr",
@@ -73,25 +99,13 @@ class TranslationActivity : AppCompatActivity() {
         "Punjabi" to "pa"
     )
 
-    companion object {
-        private const val TAG = "TranslationActivity"
-        const val REQUEST_DOCUMENT = 101
-        const val REQUEST_CAMERA_PERMISSION = 201
-        private const val MAX_IMAGE_DIMENSION = 1000
-    }
-
-    // Camera permission launcher
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        if (isGranted) {
-            openCamera()
-        } else {
-            Toast.makeText(this, "Camera permission denied", Toast.LENGTH_SHORT).show()
-        }
+    ) { isGranted ->
+        if (isGranted) openCamera()
+        else Toast.makeText(this, "Camera permission denied", Toast.LENGTH_SHORT).show()
     }
 
-    // Camera result launcher
     private val takePictureLauncher = registerForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { success ->
@@ -101,23 +115,47 @@ class TranslationActivity : AppCompatActivity() {
         }
     }
 
+    private val documentPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            result.data?.data?.let { uri ->
+                selectedFileUri = uri
+                startTextExtraction(uri, contentResolver.getType(uri))
+            }
+        }
+    }
+
+    private val driveSignInLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            initializeDriveService()
+            uploadFileToDrive()
+        } else {
+            Toast.makeText(this, "Google Drive sign-in failed", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_translation)
 
-        // Initialize ML Kit text recognizer
         textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
         processingDialog = ProcessingDialog(this)
-
-        // Initialize UI components
         container = findViewById(R.id.container)
 
-        // Check if we have text passed from previous activity
+        driveSignInOptions = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestScopes(Scope(DriveScopes.DRIVE_FILE))
+            .build()
+
+        initializeDriveService()
+
         if (intent.hasExtra("EXTRACTED_TEXT")) {
             extractedText = intent.getStringExtra("EXTRACTED_TEXT") ?: ""
             showTranslationContent()
         } else if (intent.hasExtra("FILE_URI")) {
-            // Handle file URI directly
             val uriString = intent.getStringExtra("FILE_URI")
             selectedFileUri = Uri.parse(uriString)
             val mimeType = contentResolver.getType(selectedFileUri!!)
@@ -127,65 +165,81 @@ class TranslationActivity : AppCompatActivity() {
         }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        translator?.close()
-        textRecognizer.close()
-        currentExtractionJob?.cancel()
-        if (processingDialog.isShowing()) {
-            processingDialog.dismiss()
+    private fun initializeDriveService() {
+        val account = GoogleSignIn.getLastSignedInAccount(this)
+        account?.let {
+            driveService = DriveServiceHelper.buildService(this, account.email ?: "")
         }
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        translator?.close()
+        currentExtractionJob?.cancel()
+        if (processingDialog.isShowing()) processingDialog.dismiss()
+    }
+
+    /** Show upload options */
     private fun showUploadLayout() {
         val uploadView = layoutInflater.inflate(R.layout.layout_upload_files_for_tranlate, null)
         container.removeAllViews()
         container.addView(uploadView)
 
-        // Get reference to the EditText for manual text input
         val editTextManualInput = uploadView.findViewById<EditText>(R.id.etInputText)
 
-        uploadView.findViewById<Button>(R.id.btnGallery).setOnClickListener {
-            openDocumentPicker()
-        }
-
-        uploadView.findViewById<Button>(R.id.btnCamera).setOnClickListener {
-            checkCameraPermission()
-        }
-
+        uploadView.findViewById<Button>(R.id.btnGallery).setOnClickListener { openDocumentPicker() }
+        uploadView.findViewById<Button>(R.id.btnCamera)
+            .setOnClickListener { checkCameraPermission() }
         uploadView.findViewById<Button>(R.id.btnProceed).setOnClickListener {
-            // Process manually entered text when Proceed button is clicked
             val manualText = editTextManualInput.text.toString().trim()
             if (manualText.isNotEmpty()) {
                 extractedText = manualText
                 showTranslationContent()
-            } else {
-                Toast.makeText(this, "Please enter text to translate", Toast.LENGTH_SHORT).show()
-            }
+            } else Toast.makeText(this, "Please enter text to translate", Toast.LENGTH_SHORT).show()
         }
     }
 
+    /** Show translation UI */
     private fun showTranslationContent() {
         val contentView = layoutInflater.inflate(R.layout.layout_translation, null)
         container.removeAllViews()
         container.addView(contentView)
 
-        // Initialize UI elements from the contentView
         tabOriginal = contentView.findViewById(R.id.tabOriginal)
         tabTranslated = contentView.findViewById(R.id.tabTranslated)
         spinnerLanguages = contentView.findViewById(R.id.spinnerLanguage)
         textViewTranslatedContent = contentView.findViewById(R.id.editTextTranslatedText)
+        btnSaveFile = contentView.findViewById(R.id.btnSaveFile)
 
-        // Update the text view
+        val pdfButton = contentView.findViewById<MaterialButton>(R.id.pdfDownload)
+        val wordButton = contentView.findViewById<MaterialButton>(R.id.wordDownload)
+
         textViewTranslatedContent.setText(extractedText)
 
         setupTabs()
         setupSpinner()
+
+        // ✅ Radio-like selection logic
+        pdfButton.setOnClickListener { setFormatSelection(pdfButton, wordButton, "PDF") }
+        wordButton.setOnClickListener { setFormatSelection(wordButton, pdfButton, "WORD") }
+
+        // Default selection
+        setFormatSelection(pdfButton, wordButton, "PDF")
+
+        btnSaveFile.setOnClickListener { promptFileNameAndSave() }
     }
 
+
+    private fun setFormatSelection(selected: MaterialButton, other: MaterialButton, format: String) {
+        selected.isSelected = true
+        other.isSelected = false
+        selectedFormat = format
+    }
+
+
+    /** Extract text from image or PDF */
     private fun startTextExtraction(uri: Uri, mimeType: String?) {
         processingDialog.show(message = "Extracting text...")
-
         fileType = when {
             mimeType?.startsWith("image/") == true -> "image"
             mimeType == "application/pdf" -> "pdf"
@@ -197,13 +251,10 @@ class TranslationActivity : AppCompatActivity() {
                 when (fileType) {
                     "image" -> extractTextFromImage(uri)
                     else -> {
-                        showError("Unsupported file type")
-                        showUploadLayout()
+                        showError("Unsupported file type"); showUploadLayout()
                     }
                 }
-                withContext(Dispatchers.Main) {
-                    showTranslationContent()
-                }
+                withContext(Dispatchers.Main) { showTranslationContent() }
             } catch (e: Exception) {
                 showError("Error extracting text: ${e.message}")
                 showUploadLayout()
@@ -214,54 +265,33 @@ class TranslationActivity : AppCompatActivity() {
     }
 
     private suspend fun extractTextFromImage(uri: Uri) {
-        try {
-            val options = BitmapFactory.Options().apply {
-                inJustDecodeBounds = true
-            }
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+        options.inSampleSize =
+            calculateInSampleSize(options, MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION)
+        options.inJustDecodeBounds = false
 
-            // First get image dimensions
-            contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream, null, options)
-            }
-
-            // Calculate sample size
-            options.inSampleSize = calculateInSampleSize(options, MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION)
-            options.inJustDecodeBounds = false
-
-            // Decode bitmap with proper sampling
-            val bitmap = contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream, null, options)
-            }
-
-            if (bitmap == null) {
-                showError("Failed to decode image")
-                return
-            }
-
-            // Rotate bitmap if needed
-            val rotatedBitmap = rotateBitmapIfRequired(bitmap, uri)
-            val image = InputImage.fromBitmap(rotatedBitmap, 0)
-            val result = textRecognizer.process(image).await()
-
-            extractedText = result.text ?: ""
-        } catch (e: Exception) {
-            throw IOException("Failed to process image: ${e.message}")
-        }
+        val bitmap = contentResolver.openInputStream(uri)
+            ?.use { BitmapFactory.decodeStream(it, null, options) }
+            ?: throw IOException("Failed to decode image")
+        val rotatedBitmap = rotateBitmapIfRequired(bitmap, uri)
+        val image = InputImage.fromBitmap(rotatedBitmap, 0)
+        val result = textRecognizer.process(image).await()
+        extractedText = result.text ?: ""
     }
 
-    private fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
-        val (height: Int, width: Int) = options.run { outHeight to outWidth }
+    private fun calculateInSampleSize(
+        options: BitmapFactory.Options,
+        reqWidth: Int,
+        reqHeight: Int
+    ): Int {
+        val (height, width) = options.run { outHeight to outWidth }
         var inSampleSize = 1
-
         if (height > reqHeight || width > reqWidth) {
-            val halfHeight: Int = height / 2
-            val halfWidth: Int = width / 2
-
-            while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
-                inSampleSize *= 2
-            }
+            val halfHeight = height / 2
+            val halfWidth = width / 2
+            while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) inSampleSize *= 2
         }
-
         return inSampleSize
     }
 
@@ -269,12 +299,10 @@ class TranslationActivity : AppCompatActivity() {
         return try {
             contentResolver.openInputStream(uri)?.use { input ->
                 val exif = ExifInterface(input)
-                val orientation = exif.getAttributeInt(
+                when (exif.getAttributeInt(
                     ExifInterface.TAG_ORIENTATION,
                     ExifInterface.ORIENTATION_NORMAL
-                )
-
-                when (orientation) {
+                )) {
                     ExifInterface.ORIENTATION_ROTATE_90 -> rotateBitmap(bitmap, 90f)
                     ExifInterface.ORIENTATION_ROTATE_180 -> rotateBitmap(bitmap, 180f)
                     ExifInterface.ORIENTATION_ROTATE_270 -> rotateBitmap(bitmap, 270f)
@@ -282,7 +310,6 @@ class TranslationActivity : AppCompatActivity() {
                 }
             } ?: bitmap
         } catch (e: Exception) {
-            Log.e(TAG, "Error rotating bitmap", e)
             bitmap
         }
     }
@@ -292,6 +319,7 @@ class TranslationActivity : AppCompatActivity() {
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
+    /** Tabs */
     private fun setupTabs() {
         val selectedBgOriginal = R.drawable.tab_left_selected
         val selectedBgTranslated = R.drawable.tab_right_selected
@@ -302,13 +330,11 @@ class TranslationActivity : AppCompatActivity() {
             selectedTab.setBackgroundResource(selectedBg)
             selectedTab.setTypeface(null, Typeface.BOLD)
             selectedTab.setTextColor(Color.BLACK)
-
             otherTab.setBackgroundResource(otherBg)
             otherTab.setTypeface(null, Typeface.NORMAL)
             otherTab.setTextColor(Color.BLACK)
         }
 
-        // Default tab selection
         setActiveTab(tabOriginal, tabTranslated, selectedBgOriginal, unselectedBgTranslated)
         spinnerLanguages.visibility = View.GONE
 
@@ -324,17 +350,20 @@ class TranslationActivity : AppCompatActivity() {
         }
     }
 
+    /** Language spinner */
     private fun setupSpinner() {
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, languages)
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinnerLanguages.adapter = adapter
-
         spinnerLanguages.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>, view: View?, position: Int, id: Long) {
+            override fun onItemSelected(
+                parent: AdapterView<*>,
+                view: View?,
+                position: Int,
+                id: Long
+            ) {
                 val selectedLanguage = languages[position]
-                if (selectedLanguage != "Select Language") {
-                    translateText(selectedLanguage)
-                }
+                if (selectedLanguage != "Select Language") translateText(selectedLanguage)
             }
 
             override fun onNothingSelected(parent: AdapterView<*>) {}
@@ -343,58 +372,38 @@ class TranslationActivity : AppCompatActivity() {
 
     private fun translateText(selectedLanguage: String) {
         val targetLanguageCode = languageCodes[selectedLanguage] ?: return
-
         if (extractedText.isBlank()) {
-            Toast.makeText(this, "No text to translate", Toast.LENGTH_SHORT).show()
-            return
+            Toast.makeText(this, "No text to translate", Toast.LENGTH_SHORT).show(); return
         }
 
         processingDialog.show(message = "Translating to $selectedLanguage...")
-
-        // Close previous translator if exists
         translator?.close()
 
-        // Create translator
         val options = TranslatorOptions.Builder()
             .setSourceLanguage(TranslateLanguage.ENGLISH)
             .setTargetLanguage(targetLanguageCode)
             .build()
-
         translator = Translation.getClient(options)
 
-        // Download models if needed
-        val conditions = DownloadConditions.Builder()
-            .build()
-
-        translator?.downloadModelIfNeeded(conditions)
+        translator?.downloadModelIfNeeded(DownloadConditions.Builder().build())
             ?.addOnSuccessListener {
-                // Perform translation
                 translator?.translate(extractedText)
                     ?.addOnSuccessListener { translatedText ->
                         processingDialog.dismiss()
                         textViewTranslatedContent.setText(translatedText)
-                        Toast.makeText(
-                            this,
-                            "Translated to $selectedLanguage",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        Toast.makeText(this, "Translated to $selectedLanguage", Toast.LENGTH_SHORT)
+                            .show()
                     }
                     ?.addOnFailureListener { e ->
                         processingDialog.dismiss()
-                        Toast.makeText(
-                            this,
-                            "Translation failed: ${e.message}",
-                            Toast.LENGTH_LONG
-                        ).show()
+                        Toast.makeText(this, "Translation failed: ${e.message}", Toast.LENGTH_LONG)
+                            .show()
                     }
             }
             ?.addOnFailureListener { e ->
                 processingDialog.dismiss()
-                Toast.makeText(
-                    this,
-                    "Model download failed: ${e.message}",
-                    Toast.LENGTH_LONG
-                ).show()
+                Toast.makeText(this, "Model download failed: ${e.message}", Toast.LENGTH_LONG)
+                    .show()
             }
     }
 
@@ -403,7 +412,7 @@ class TranslationActivity : AppCompatActivity() {
             type = "*/*"
             putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "application/pdf"))
         }
-        startActivityForResult(intent, REQUEST_DOCUMENT)
+        documentPickerLauncher.launch(intent)
     }
 
     private fun checkCameraPermission() {
@@ -411,12 +420,9 @@ class TranslationActivity : AppCompatActivity() {
             ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.CAMERA
-            ) == PackageManager.PERMISSION_GRANTED -> {
-                openCamera()
-            }
-            else -> {
-                requestPermissionLauncher.launch(Manifest.permission.CAMERA)
-            }
+            ) == PackageManager.PERMISSION_GRANTED -> openCamera()
+
+            else -> requestPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
     }
 
@@ -426,16 +432,11 @@ class TranslationActivity : AppCompatActivity() {
                 val photoFile: File? = try {
                     createImageFile()
                 } catch (ex: IOException) {
-                    Log.e(TAG, "Error creating image file", ex)
                     null
                 }
-
                 photoFile?.also {
-                    val photoURI = FileProvider.getUriForFile(
-                        this,
-                        "${packageName}.fileprovider",
-                        it
-                    )
+                    val photoURI =
+                        FileProvider.getUriForFile(this, "${packageName}.fileprovider", it)
                     currentPhotoPath = it.absolutePath
                     takePictureLauncher.launch(photoURI)
                 }
@@ -447,30 +448,190 @@ class TranslationActivity : AppCompatActivity() {
     private fun createImageFile(): File {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val storageDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES)
-        return File.createTempFile(
-            "JPEG_${timeStamp}_",
-            ".jpg",
-            storageDir
-        ).apply {
-            currentPhotoPath = absolutePath
-        }
+        return File.createTempFile("JPEG_${timeStamp}_", ".jpg", storageDir)
+            .apply { currentPhotoPath = absolutePath }
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_DOCUMENT && resultCode == RESULT_OK) {
-            data?.data?.let { uri ->
-                val mimeType = contentResolver.getType(uri)
-                selectedFileUri = uri
-                startTextExtraction(uri, mimeType)
+    private fun showError(message: String) {
+        runOnUiThread { Toast.makeText(this, message, Toast.LENGTH_LONG).show() }
+    }
+
+    /** Prompt filename and upload */
+    private fun promptFileNameAndSave() {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_filename_prompt, null).apply {
+            findViewById<EditText>(R.id.filename_input).apply {
+                val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                setText("Scan_$ts")
+                setSelection(text.length)
+            }
+            startAnimation(AnimationUtils.loadAnimation(this@TranslationActivity, R.anim.dialog_fade_in))
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .setCancelable(false)
+            .setPositiveButton("Save", null)
+            .setNegativeButton("Cancel") { d, _ -> d.dismiss() }
+            .create()
+
+        dialog.setOnShowListener {
+            val saveButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            saveButton.setOnClickListener {
+                val input = dialogView.findViewById<EditText>(R.id.filename_input)
+                val fileName = input.text.toString().trim()
+                if (fileName.isEmpty()) {
+                    input.error = "File name cannot be empty"
+                    return@setOnClickListener
+                }
+
+                // === GOOGLE DRIVE UPLOAD ===
+                prepareFileForUpload(fileName)
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
+    /** Prepare file bytes and ensure sign-in */
+    private fun prepareFileForUpload(filename: String) {
+        if (textViewTranslatedContent.text.isBlank()) {
+            Toast.makeText(this, "No text to save", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val fileBytes = if (selectedFormat == "PDF") {
+                    createPdfFile()
+                } else {
+                    createWordFile()
+                }
+
+                withContext(Dispatchers.Main) {
+                    pendingFileName = filename
+                    pendingFileBytes = fileBytes
+                    ensureDriveAccountThenUpload()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        this@TranslationActivity,
+                        "Error preparing file: ${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             }
         }
     }
 
-    private fun showError(message: String) {
+    private fun createPdfFile(): ByteArray {
+        val pdfDocument = android.graphics.pdf.PdfDocument()
+        val pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(595, 842, 1).create()
+        val page = pdfDocument.startPage(pageInfo)
+        val canvas = page.canvas
+        val paint = Paint().apply {
+            color = Color.BLACK
+            textSize = 12f
+        }
+
+        var y = 25f
+        val lines = textViewTranslatedContent.text.split("\n")
+        for (line in lines) {
+            canvas.drawText(line, 10f, y, paint)
+            y += paint.descent() - paint.ascent()
+        }
+
+        pdfDocument.finishPage(page)
+        val stream = ByteArrayOutputStream()
+        pdfDocument.writeTo(stream)
+        pdfDocument.close()
+        return stream.toByteArray()
+    }
+
+    private fun createWordFile(): ByteArray {
+        val doc = XWPFDocument()
+        val paragraph = doc.createParagraph()
+        val run = paragraph.createRun()
+        run.setText(textViewTranslatedContent.text.toString())
+
+        val stream = ByteArrayOutputStream()
+        doc.write(stream)
+        doc.close()
+        return stream.toByteArray()
+    }
+
+    /** Check Google sign-in and upload */
+    private fun ensureDriveAccountThenUpload() {
+        val last = GoogleSignIn.getLastSignedInAccount(this)
+        val hasDrive = last != null && GoogleSignIn.hasPermissions(last, Scope(DriveScopes.DRIVE_FILE))
+
+        if (hasDrive) {
+            uploadFileToDrive()
+        } else {
+            val signInIntent = GoogleSignIn.getClient(this, driveSignInOptions).signInIntent
+            driveSignInLauncher.launch(signInIntent)
+        }
+    }
+
+    /** Upload using DriveServiceHelper */
+    private fun uploadFileToDrive() {
+        if (pendingFileBytes == null || pendingFileName == null) {
+            Toast.makeText(this, "No file to upload", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val driveService = driveService ?: run {
+            Toast.makeText(this, "Drive service not initialized", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // Show processing dialog on UI thread
         runOnUiThread {
-            Log.e(TAG, message)
-            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+            processingDialog.show(message = "Uploading to Google Drive...")
+        }
+
+        val fileExtension = if (selectedFormat == "PDF") ".pdf" else ".docx"
+        val fileName = "${pendingFileName}$fileExtension"
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // Save the file to a temporary location
+                val tempFile = File(cacheDir, fileName)
+                FileOutputStream(tempFile).use { fos ->
+                    fos.write(pendingFileBytes!!)
+                }
+
+                // Upload the file using DriveServiceHelper
+                val fileId = DriveServiceHelper.uploadFileToAppFolder(
+                    driveService,
+                    this@TranslationActivity,
+                    Uri.fromFile(tempFile),
+                    fileName
+                )
+
+                withContext(Dispatchers.Main) {
+                    processingDialog.dismiss()
+                    Toast.makeText(
+                        this@TranslationActivity,
+                        "File uploaded successfully!",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    Log.d("DriveUpload", "File uploaded with ID: $fileId")
+
+                    // Clean up the temporary file
+                    tempFile.delete()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    processingDialog.dismiss()
+                    Toast.makeText(
+                        this@TranslationActivity,
+                        "Upload failed: ${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    Log.e("DriveUpload", "Error uploading file", e)
+                }
+            }
         }
     }
 }

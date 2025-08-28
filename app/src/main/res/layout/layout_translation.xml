@@ -2,6 +2,7 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/main"
     android:background="#FFFFFF">
 
@@ -169,30 +170,50 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:gravity="center">
+            android:gravity="center"
+            android:padding="16dp"
+            android:layout_marginTop="16dp">
 
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/pdfDownload"
+                style="@style/Widget.MaterialComponents.Button"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="48dp"
                 android:layout_weight="1"
                 android:text="PDF"
-                android:backgroundTint="#0061FF"
-                android:textColor="#FFFFFF"
+                android:textAllCaps="false"
+                android:textColor="@color/pdf_button_color"
+                android:backgroundTint="@color/button_background_color"
                 android:drawableStart="@drawable/ic_pdf"
-                android:drawablePadding="6dp" />
+                android:drawablePadding="8dp"
+                android:insetTop="8dp"
+                android:insetBottom="8dp"
+                android:layout_marginEnd="8dp"
+                android:gravity="center_vertical"/>
 
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/wordDownload"
+                style="@style/Widget.MaterialComponents.Button"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="48dp"
                 android:layout_weight="1"
                 android:text="Word"
-                android:layout_marginStart="8dp"
-                android:backgroundTint="#EEEEEE"
-                android:textColor="#000000"
+                android:textAllCaps="false"
+                android:textColor="@color/word_button_color"
+                android:backgroundTint="@color/button_background_color"
                 android:drawableStart="@drawable/ic_word"
-                android:drawablePadding="6dp" />
+                android:drawablePadding="8dp"
+                android:insetTop="8dp"
+                android:insetBottom="8dp"
+                android:layout_marginStart="8dp"
+                android:gravity="center_vertical"/>
         </LinearLayout>
+        <Button
+            android:id="@+id/btnSaveFile"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Save"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="16dp"/>
     </LinearLayout>
 </ScrollView>

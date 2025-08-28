@@ -143,29 +143,7 @@
             android:weightSum="2"
             android:layout_marginTop="10dp">
 
-            <Button
-                android:id="@+id/btnConvertToPDF"
-                android:layout_width="0dp"
-                android:layout_height="48dp"
-                android:layout_weight="1"
-                android:text="Convert to PDF"
-                android:textColor="@android:color/white"
-                android:backgroundTint="#2563EB"
-                android:layout_marginEnd="8dp"
-                android:drawableStart="@drawable/ic_pdf"
-                android:drawablePadding="6dp" />
 
-            <Button
-                android:id="@+id/btnConvertToWord"
-                android:layout_width="0dp"
-                android:layout_height="48dp"
-                android:layout_weight="1"
-                android:text="Convert to Word"
-                android:textColor="#EA580C"
-                android:backgroundTint="#FFF4E7"
-                android:layout_marginStart="8dp"
-                android:drawableStart="@drawable/ic_word"
-                android:drawablePadding="6dp" />
         </LinearLayout>
 
         <!-- Translate -->

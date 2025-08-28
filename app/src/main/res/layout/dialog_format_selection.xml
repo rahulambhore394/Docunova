@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@color/white"
+    android:padding="16dp"
+    android:elevation="4dp"
+    android:clipToPadding="false"
+    android:clipToOutline="true">
+
+    <!-- Title -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Choose File Format"
+        android:textAppearance="@style/TextAppearance.MaterialComponents.Headline6"
+        android:textColor="@color/black"
+        android:layout_marginBottom="20dp" />
+
+    <!-- PDF Option -->
+    <LinearLayout
+        android:id="@+id/option_pdf"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="16dp"
+        android:background="@drawable/bg_option_selector"
+        android:layout_marginBottom="12dp"
+        android:gravity="center_vertical"
+        android:clickable="true"
+        android:focusable="true">
+
+        <ImageView
+            android:id="@+id/icon_pdf"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_pdf"
+            android:layout_marginEnd="12dp"
+            app:tint="@color/gray_700" />
+
+        <TextView
+            android:id="@+id/text_pdf"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="PDF Document"
+            android:textAppearance="@style/TextAppearance.MaterialComponents.Body1"
+            android:textColor="@color/gray_800" />
+
+        <ImageView
+            android:id="@+id/check_pdf"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_check_circle"
+            android:visibility="gone"
+            app:tint="@color/colorPrimary" />
+
+    </LinearLayout>
+
+    <!-- Word Option -->
+    <LinearLayout
+        android:id="@+id/option_word"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="16dp"
+        android:background="@drawable/bg_option_selector"
+        android:layout_marginBottom="12dp"
+        android:gravity="center_vertical"
+        android:clickable="true"
+        android:focusable="true">
+
+        <ImageView
+            android:id="@+id/icon_word"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_word"
+            android:layout_marginEnd="12dp"
+            app:tint="@color/gray_700" />
+
+        <TextView
+            android:id="@+id/text_word"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Word Document"
+            android:textAppearance="@style/TextAppearance.MaterialComponents.Body1"
+            android:textColor="@color/gray_800" />
+
+        <ImageView
+            android:id="@+id/check_word"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_check_circle"
+            android:visibility="gone"
+            app:tint="@color/colorPrimary" />
+
+    </LinearLayout>
+
+    <!-- Text Option -->
+    <LinearLayout
+        android:id="@+id/option_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="16dp"
+        android:background="@drawable/bg_option_selector"
+        android:layout_marginBottom="24dp"
+        android:gravity="center_vertical"
+        android:clickable="true"
+        android:focusable="true">
+
+        <ImageView
+            android:id="@+id/icon_text"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_text"
+            android:layout_marginEnd="12dp"
+            app:tint="@color/gray_700" />
+
+        <TextView
+            android:id="@+id/text_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Text File"
+            android:textAppearance="@style/TextAppearance.MaterialComponents.Body1"
+            android:textColor="@color/gray_800" />
+
+        <ImageView
+            android:id="@+id/check_text"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_check_circle"
+            android:visibility="gone"
+            app:tint="@color/colorPrimary" />
+
+    </LinearLayout>
+
+    <!-- Continue Button -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_confirm"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Continue"
+        style="@style/Widget.MaterialComponents.Button"
+        android:textAllCaps="false"
+        android:textColor="@android:color/white"
+        app:cornerRadius="24dp"
+        android:backgroundTint="@color/colorPrimary"
+        android:layout_marginTop="8dp" />
+
+</LinearLayout>

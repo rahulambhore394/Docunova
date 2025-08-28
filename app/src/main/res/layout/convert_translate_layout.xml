@@ -63,27 +63,7 @@
             android:gravity="center"
             android:layout_marginBottom="16dp">
 
-            <Button
-                android:id="@+id/btnConvertToPDF"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Convert to PDF"
-                android:drawableStart="@drawable/ic_pdf"
-                android:backgroundTint="#0C51D4"
-                android:textColor="@android:color/white"
-                android:layout_marginEnd="8dp" />
 
-            <Button
-                android:id="@+id/btnConvertToWord"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Convert to Word"
-                android:drawableStart="@drawable/ic_word"
-                android:backgroundTint="#FFF4E7"
-                android:textColor="#E58A1F"
-                android:layout_marginStart="8dp" />
         </LinearLayout>
 
         <!-- Editable Text Box -->

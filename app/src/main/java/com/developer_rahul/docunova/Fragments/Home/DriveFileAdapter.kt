@@ -7,7 +7,6 @@ import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
-import android.widget.Toast
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.developer_rahul.docunova.R
@@ -16,9 +15,10 @@ data class DriveFileModel(
     val id: String,
     val name: String,
     val mimeType: String,
-    val size: String,
+    val size: Int,
     val thumbnailLink: String
 )
+
 
 class DriveFileAdapter(
     private val context: Context,

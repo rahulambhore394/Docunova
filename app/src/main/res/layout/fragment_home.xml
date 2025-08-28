@@ -294,6 +294,7 @@
                         </androidx.cardview.widget.CardView>
                     </LinearLayout>
 
+
                     <!-- Second Row -->
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -338,6 +339,7 @@
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
                                         android:text="47"
+                                        android:id="@+id/tv_scanned_files_count"
                                         android:textSize="20sp"
                                         android:textStyle="bold"
                                         android:textColor="#000" />
@@ -387,6 +389,7 @@
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
                                         android:text="2.3 GB"
+                                        android:id="@+id/tv_drive_size"
                                         android:textSize="20sp"
                                         android:textStyle="bold"
                                         android:textColor="#000" />
