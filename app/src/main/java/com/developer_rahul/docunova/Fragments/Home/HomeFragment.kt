@@ -35,7 +35,6 @@ import com.developer_rahul.docunova.Adapters.RecentFileAdapter
 import com.developer_rahul.docunova.DriveServiceHelper
 import com.developer_rahul.docunova.DriveServiceHelper.downloadFile
 import com.developer_rahul.docunova.Fragments.SharedViewModel
-import com.developer_rahul.docunova.ProfileActivity
 import com.developer_rahul.docunova.R
 import com.developer_rahul.docunova.RoomDB.AppDatabase
 import com.developer_rahul.docunova.RoomDB.RecentFile

@@ -16,11 +16,20 @@ import com.android.volley.Request
 import com.android.volley.toolbox.JsonObjectRequest
 import com.android.volley.toolbox.Volley
 import com.bumptech.glide.Glide
+import com.developer_rahul.docunova.DriveServiceHelper
 import com.developer_rahul.docunova.LoginActivity
 import com.developer_rahul.docunova.R
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.Scope
+import com.google.api.services.drive.DriveScopes
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.text.CharacterIterator
+import java.text.StringCharacterIterator
 
 class SettingFragment : Fragment() {
 
@@ -31,7 +40,9 @@ class SettingFragment : Fragment() {
     }
 
     private lateinit var tvUsername: TextView
-    private lateinit var tvUserEmail: TextView // Added for email
+    private lateinit var tvUserEmail: TextView
+    private lateinit var tvDriveFilesCount: TextView
+    private lateinit var tvDriveStorage: TextView
     private lateinit var profileImage: ImageView
     private lateinit var btnLogOut: Button
     private lateinit var googleSignInClient: GoogleSignInClient
@@ -55,16 +66,73 @@ class SettingFragment : Fragment() {
 
         // Initialize views
         tvUsername = view.findViewById(R.id.userName)
-        tvUserEmail = view.findViewById(R.id.emailTag) // Initialize email TextView
+        tvUserEmail = view.findViewById(R.id.emailTag)
+        tvDriveFilesCount = view.findViewById(R.id.tv_file_count)
+        tvDriveStorage = view.findViewById(R.id.tv_drive_size)
         profileImage = view.findViewById(R.id.profileImage)
         btnLogOut = view.findViewById(R.id.signOutBtn)
 
         // Fetch and display user details
         fetchUserDetails()
 
+        // Load Google Drive information
+        loadDriveInfo()
+
         btnLogOut.setOnClickListener {
             logout()
         }
+    }
+
+    private fun loadDriveInfo() {
+        val account = GoogleSignIn.getLastSignedInAccount(requireContext())
+        if (account != null && GoogleSignIn.hasPermissions(account, Scope(DriveScopes.DRIVE_FILE))) {
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val drive = DriveServiceHelper.buildService(requireContext(), account.email!!)
+                    val files = DriveServiceHelper.listFilesFromAppFolder(drive)
+
+                    var totalSize: Long = 0
+                    for (file in files) {
+                        totalSize += file.size
+                    }
+
+                    val sizeFormatted = formatFileSize(totalSize)
+
+                    withContext(Dispatchers.Main) {
+                        tvDriveFilesCount.text = files.size.toString()
+                        tvDriveStorage.text = sizeFormatted
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        if (e.message?.contains("401") == true || e.message?.contains("403") == true) {
+                            tvDriveFilesCount.text = "Sign in required"
+                            tvDriveStorage.text = "Authentication expired"
+                        } else {
+                            tvDriveFilesCount.text = "Error loading"
+                            tvDriveStorage.text = "Failed to load"
+                            Log.e(TAG, "Failed to load Drive info: ${e.message}")
+                        }
+                    }
+                }
+            }
+        } else {
+            tvDriveFilesCount.text = "Not connected"
+            tvDriveStorage.text = "Sign in to Google Drive"
+        }
+    }
+
+    private fun formatFileSize(bytes: Long): String {
+        if (bytes < 1024) return "$bytes B"
+        var value = bytes.toDouble()
+        val units = arrayOf("KB", "MB", "GB", "TB")
+        var unitIndex = 0
+
+        while (value >= 1024 && unitIndex < units.size - 1) {
+            value /= 1024
+            unitIndex++
+        }
+
+        return String.format("%.1f %s", value, units[unitIndex])
     }
 
     private fun fetchUserDetails() {
@@ -76,13 +144,12 @@ class SettingFragment : Fragment() {
             tvUsername.text = "Guest User"
             tvUserEmail.text = "Not logged in"
             profileImage.setImageResource(R.drawable.ic_profile)
-            Toast.makeText(requireContext(), "Please log in first.", Toast.LENGTH_SHORT).show()
             return
         }
 
         if (loginMethod == "google") {
             val fullName = prefs.getString("google_full_name", null)
-            val email = prefs.getString("google_email", null) // Get email from prefs
+            val email = prefs.getString("google_email", null)
             val avatarUrl = prefs.getString("google_avatar_url", null)
 
             tvUsername.text = fullName ?: "Google User"
@@ -96,8 +163,6 @@ class SettingFragment : Fragment() {
             } else {
                 profileImage.setImageResource(R.drawable.ic_profile)
             }
-
-            Log.d(TAG, "Loaded Google profile from SharedPreferences")
             return
         }
 
@@ -106,7 +171,6 @@ class SettingFragment : Fragment() {
                 tvUsername.text = "Session Expired"
                 tvUserEmail.text = "Please log in again"
                 profileImage.setImageResource(R.drawable.ic_profile)
-                Toast.makeText(requireContext(), "Session expired. Please log in again.", Toast.LENGTH_SHORT).show()
                 return
             }
 
@@ -115,13 +179,11 @@ class SettingFragment : Fragment() {
                 Request.Method.GET, url, null,
                 { response ->
                     try {
-                        Log.d(TAG, "User details response: $response")
                         val email = response.optString("email", "No Email")
                         val metadata = response.optJSONObject("user_metadata")
                         val fullName = metadata?.optString("full_name") ?: email
                         val avatarUrl = metadata?.optString("avatar_url") ?: ""
 
-                        // Display both name and email
                         tvUsername.text = fullName
                         tvUserEmail.text = email
 
@@ -135,14 +197,10 @@ class SettingFragment : Fragment() {
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Error parsing user details", e)
-                        Toast.makeText(requireContext(), "Error reading profile data", Toast.LENGTH_SHORT).show()
                     }
                 },
                 { error ->
-                    val code = error.networkResponse?.statusCode
-                    val body = error.networkResponse?.data?.let { String(it) }
-                    Log.e(TAG, "Error fetching user: Code=$code, Body=$body", error)
-                    Toast.makeText(requireContext(), "Failed to load user profile", Toast.LENGTH_SHORT).show()
+                    Log.e(TAG, "Error fetching user details", error)
                 }
             ) {
                 override fun getHeaders(): MutableMap<String, String> {
@@ -162,7 +220,6 @@ class SettingFragment : Fragment() {
         val prefs = requireContext().getSharedPreferences("MyAppPrefs", Context.MODE_PRIVATE)
         val loginMethod = prefs.getString("login_method", null)
 
-        // Clear SharedPreferences
         prefs.edit().clear().apply()
 
         if (loginMethod == "google") {

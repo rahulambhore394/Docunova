@@ -127,6 +127,7 @@ dependencies {
     implementation("com.google.guava:guava:31.1-android")
     implementation ("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
     implementation ("com.facebook.shimmer:shimmer:0.5.0")
+    implementation ("de.hdodenhof:circleimageview:3.1.0")
 }
 
 configurations.all {
