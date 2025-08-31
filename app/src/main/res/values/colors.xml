@@ -110,4 +110,7 @@
     <color name="toggleActive">#6200EE</color>
     <color name="toggleInactive">#9E9E9E</color>
 
+
+    <color name="gray">#757575</color>
+
 </resources>

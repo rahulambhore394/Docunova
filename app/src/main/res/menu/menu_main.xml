@@ -11,9 +11,5 @@
         android:icon="@drawable/ic_view_toggle"
         android:title="Toggle View"
         app:showAsAction="always" />
-    <item
-        android:id="@+id/action_more"
-        android:icon="@drawable/ic_more"
-        android:title="More"
-        app:showAsAction="always" />
+
 </menu>

@@ -7,7 +7,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
-import android.text.format.Formatter.formatFileSize
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
@@ -20,7 +19,9 @@ import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.widget.PopupMenu
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -33,11 +34,11 @@ import com.bumptech.glide.Glide
 import com.developer_rahul.docunova.Adapters.RecentFileAdapter
 import com.developer_rahul.docunova.DriveServiceHelper
 import com.developer_rahul.docunova.DriveServiceHelper.downloadFile
+import com.developer_rahul.docunova.Fragments.SharedViewModel
 import com.developer_rahul.docunova.ProfileActivity
 import com.developer_rahul.docunova.R
 import com.developer_rahul.docunova.RoomDB.AppDatabase
 import com.developer_rahul.docunova.RoomDB.RecentFile
-import com.developer_rahul.docunova.GoogleDriveClient
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
@@ -55,6 +56,12 @@ import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
+// Add these imports at the top
+import com.developer_rahul.docunova.Fragments.Files.DriveFileModel
+import com.developer_rahul.docunova.Fragments.Files.FileAdapter
+import com.developer_rahul.docunova.Fragments.Files.FilesFragment
+import com.developer_rahul.docunova.Fragments.Setting.SettingFragment
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 class HomeFragment : Fragment() {
 
@@ -63,10 +70,11 @@ class HomeFragment : Fragment() {
     private val SUPABASE_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJpdWRjeXdneWdiYWNmeGZwdXZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM1Mzg1NDQsImV4cCI6MjA2OTExNDU0NH0.enJZKTQjKtOyB6VU5pYo_vf4p7ZLv2ayYuyqBWvLqbA"
     private val SUPABASE_STORAGE_URL = "$SUPABASE_URL/storage/v1"
     private val BUCKET_NAME = "user-documents"
-    private lateinit var driveAdapter: DriveFileAdapter
+    private lateinit var driveAdapter: FileAdapter
 
     private lateinit var tvTotalFiles: TextView
     private lateinit var tvTotalSize: TextView
+    private lateinit var sharedViewModel: SharedViewModel
 
     private var scanner: GmsDocumentScanner? = null
     private var scannerLauncher: ActivityResultLauncher<IntentSenderRequest>? = null
@@ -109,6 +117,14 @@ class HomeFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        sharedViewModel = ViewModelProvider(requireActivity()).get(SharedViewModel::class.java)
+
+        sharedViewModel.scanTrigger.observe(viewLifecycleOwner) { shouldScan ->
+            if (shouldScan) {
+                launchDocumentScanner()
+                sharedViewModel.resetTrigger()
+            }
+        }
         tvTotalFiles = view.findViewById(R.id.tv_scanned_files_count)
         tvTotalSize = view.findViewById(R.id.tv_drive_size)
         swipeRefreshLayout = view.findViewById(R.id.swipeRefresh)
@@ -120,14 +136,18 @@ class HomeFragment : Fragment() {
         fetchUserDetails()
 
         loadDriveFiles()
-        driveAdapter = DriveFileAdapter(
+        driveAdapter = FileAdapter(
             requireContext(),
             emptyList(),
+            FileAdapter.VIEW_TYPE_LIST, // Add view type parameter
             onDownloadClick = { file ->
                 downloadFileFromDrive(file.id, file.name)
             },
             onFileClick = { file ->
                 openDriveFile(file)
+            },
+            onMoreClick = { file, anchorView ->
+                showFileOptionsMenu(file, anchorView)
             }
         )
         recyclerView.adapter = driveAdapter
@@ -136,7 +156,6 @@ class HomeFragment : Fragment() {
 
         setupSwipeRefresh()
 
-        // Register Drive sign-in result handler
         // Register Drive sign-in result handler
         googleDriveSignInLauncher = registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
@@ -261,139 +280,121 @@ class HomeFragment : Fragment() {
         }
     }
 
+    private fun showFileOptionsMenu(file: DriveFileModel, anchorView: View) {
+        val popup = PopupMenu(requireContext(), anchorView)
+        popup.menuInflater.inflate(R.menu.menu_file_options, popup.menu)
 
+        popup.setOnMenuItemClickListener { menuItem ->
+            when (menuItem.itemId) {
+                R.id.action_share -> {
+                    shareFile(file)
+                    true
+                }
+                R.id.action_rename -> {
+                    renameFile(file)
+                    true
+                }
+                R.id.action_delete -> {
+                    deleteFile(file)
+                    true
+                }
+                else -> false
+            }
+        }
+        popup.setForceShowIcon(true)
+        popup.show()
+    }
+    private fun shareFile(file: DriveFileModel) {
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, file.name)
+            putExtra(Intent.EXTRA_TEXT, "https://drive.google.com/file/d/${file.id}/view")
+        }
+        startActivity(Intent.createChooser(shareIntent, "Share file"))
+    }
 
-    private fun openFileWithDriveApi(file: DriveFileModel, account: GoogleSignInAccount) {
+    private fun renameFile(file: DriveFileModel) {
+        val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_rename_file, null)
+        val editText = dialogView.findViewById<EditText>(R.id.renameInput)
+        editText.setText(file.name)
+
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("Rename File")
+            .setView(dialogView)
+            .setPositiveButton("Rename") { dialog, _ ->
+                val newName = editText.text.toString().trim()
+                if (newName.isNotEmpty() && newName != file.name) {
+                    performRenameFile(file, newName)
+                } else {
+                    Toast.makeText(requireContext(), "Please enter a valid name", Toast.LENGTH_SHORT).show()
+                }
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel") { dialog, _ ->
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    private fun performRenameFile(file: DriveFileModel, newName: String) {
+        val account = GoogleSignIn.getLastSignedInAccount(requireContext()) ?: return
+
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val drive = DriveServiceHelper.buildService(requireContext(), account.email!!)
 
-                // Get the file metadata to get the proper webViewLink
-                val driveFile = drive.files().get(file.id)
-                    .setFields("webViewLink, webContentLink")
-                    .execute()
+                // Get file metadata
+                val fileMetadata = com.google.api.services.drive.model.File().apply {
+                    name = newName
+                }
 
-                val webViewLink = driveFile.webViewLink
+                // Update file name
+                drive.files().update(file.id, fileMetadata).execute()
 
                 withContext(Dispatchers.Main) {
-                    // Try to open with Google Drive app using proper intent
-                    try {
-                        // Method 1: Try to open with Google Drive app using content:// URI
-                        val intent = Intent(Intent.ACTION_VIEW).apply {
-                            // Use content:// URI instead of https://
-                            data = Uri.parse("content://com.google.android.apps.drive.DRIVE_OPEN_FILE/${file.id}")
-                            setPackage("com.google.android.apps.docs")
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-
-                        if (intent.resolveActivity(requireContext().packageManager) != null) {
-                            startActivity(intent)
-                        } else {
-                            // Method 2: Fallback to web browser with authenticated link
-                            openAuthenticatedFileInBrowser(webViewLink)
-                        }
-                    } catch (e: Exception) {
-                        // Method 3: Final fallback to regular browser
-                        openFileInBrowser(file)
-                    }
+                    Toast.makeText(requireContext(), "File renamed successfully", Toast.LENGTH_SHORT).show()
+                    loadDriveFiles() // Refresh the list
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(requireContext(), "Failed to open file: ${e.message}", Toast.LENGTH_SHORT).show()
-                    openFileInBrowser(file) // Fallback to browser
+                    Toast.makeText(requireContext(), "Failed to rename file: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
         }
     }
 
-    private fun openAuthenticatedFileInBrowser(webViewLink: String) {
-        try {
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                data = Uri.parse(webViewLink)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    private fun deleteFile(file: DriveFileModel) {
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("Delete File")
+            .setMessage("Are you sure you want to delete '${file.name}'?")
+            .setPositiveButton("Delete") { dialog, _ ->
+                performDeleteFile(file)
+                dialog.dismiss()
             }
-            startActivity(intent)
-        } catch (e: Exception) {
-            Toast.makeText(requireContext(), "Failed to open file in browser", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-
-    private fun openFileWithSignedInAccount(file: DriveFileModel, account: GoogleSignInAccount) {
-        try {
-            // Build the Drive URL with proper authentication
-            val driveUrl = "https://drive.google.com/file/d/${file.id}/view"
-
-            // Try to open in Google Drive app first
-            val driveIntent = Intent(Intent.ACTION_VIEW).apply {
-                data = Uri.parse(driveUrl)
-                setPackage("com.google.android.apps.docs")
-                // Add flags to maintain the user session
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .setNegativeButton("Cancel") { dialog, _ ->
+                dialog.dismiss()
             }
-
-            // Check if Drive app can handle this intent
-            val packageManager = requireContext().packageManager
-            if (driveIntent.resolveActivity(packageManager) != null) {
-                startActivity(driveIntent)
-            } else {
-                // Fallback: Open in browser with authenticated session
-                openFileInBrowser(file)
-            }
-        } catch (e: Exception) {
-            Toast.makeText(requireContext(), "Failed to open file: ${e.message}", Toast.LENGTH_SHORT).show()
-            openFileInBrowser(file) // Fallback to browser
-        }
-    }
-
-    private fun trySilentSignIn() {
-        val account = GoogleSignIn.getLastSignedInAccount(requireContext())
-        if (account != null) {
-            // Already signed in, load files
-            loadDriveFiles()
-        } else {
-            // Try silent sign-in
-            GoogleSignIn.getClient(requireContext(), driveGso)
-                .silentSignIn()
-                .addOnCompleteListener { task ->
-                    if (task.isSuccessful) {
-                        // Silent sign-in succeeded, load files
-                        loadDriveFiles()
-                    } else {
-                        // Silent sign-in failed, need explicit sign-in
-                        Toast.makeText(requireContext(), "Please sign in to access Google Drive", Toast.LENGTH_SHORT).show()
-                    }
-                }
-        }
-    }
-
-
-    private fun showDriveAppInstallDialog(file: DriveFileModel) {
-        AlertDialog.Builder(requireContext())
-            .setTitle("Google Drive App Required")
-            .setMessage("For the best experience, we recommend opening files in the Google Drive app. Would you like to install it?")
-            .setPositiveButton("Install") { _, _ ->
-                openPlayStoreForDriveApp()
-            }
-            .setNegativeButton("Open in Browser") { _, _ ->
-                openFileInBrowser(file)
-            }
-            .setNeutralButton("Cancel", null)
             .show()
     }
+    private fun performDeleteFile(file: DriveFileModel) {
+        val account = GoogleSignIn.getLastSignedInAccount(requireContext()) ?: return
 
-    private fun openPlayStoreForDriveApp() {
-        try {
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                data = Uri.parse("market://details?id=com.google.android.apps.docs")
-                setPackage("com.android.vending") // Google Play Store package
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val drive = DriveServiceHelper.buildService(requireContext(), account.email!!)
+
+                // Delete file from Drive
+                drive.files().delete(file.id).execute()
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(requireContext(), "File deleted successfully", Toast.LENGTH_SHORT).show()
+                    loadDriveFiles() // Refresh the list
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(requireContext(), "Failed to delete file: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
             }
-            startActivity(intent)
-        } catch (e: Exception) {
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                data = Uri.parse("https://play.google.com/store/apps/details?id=com.google.android.apps.docs")
-            }
-            startActivity(intent)
         }
     }
 
@@ -405,7 +406,11 @@ class HomeFragment : Fragment() {
             launchDocumentScanner()
         }
         profileImage.setOnClickListener {
-            startActivity(Intent(requireContext(), ProfileActivity::class.java))
+            val settingFragment = SettingFragment()
+            parentFragmentManager.beginTransaction()
+                .replace(R.id.fragment_container, settingFragment) // Use your container ID
+                .addToBackStack("Setting")
+                .commit()
         }
 
         setupOptionButtons(view)
@@ -414,40 +419,54 @@ class HomeFragment : Fragment() {
     private fun loadDriveFiles() {
         val account = GoogleSignIn.getLastSignedInAccount(requireContext())
         if (account != null && GoogleSignIn.hasPermissions(account, Scope(DriveScopes.DRIVE_FILE))) {
+            swipeRefreshLayout.isRefreshing = true
+
             lifecycleScope.launch(Dispatchers.IO) {
                 try {
                     val drive = DriveServiceHelper.buildService(requireContext(), account.email!!)
                     val files = DriveServiceHelper.listFilesFromAppFolder(drive)
 
+                    // Convert to DriveFileModel
+                    val driveFiles = files.map { file ->
+                        DriveFileModel(
+                            id = file.id,
+                            name = file.name,
+                            mimeType = file.mimeType,
+                            size = file.size,
+                            modifiedTime = file.modifiedTime,
+                            thumbnailLink = file.thumbnailLink,
+                            webContentLink = file.webContentLink,
+                            createdTime = file.createdTime
+                        )
+                    }
+
                     var totalSize: Long = 0
-                    for (file in files) {
-                        file.size.toString().toLongOrNull()?.let {
-                            totalSize += it
-                        }
+                    for (file in driveFiles) {
+                        totalSize += file.size
                     }
 
                     val sizeFormatted = formatFileSize(totalSize)
                     withContext(Dispatchers.Main) {
-                        driveAdapter.updateFiles(files)
-                        tvTotalFiles.text = "${files.size}"
+                        driveAdapter.updateFiles(driveFiles) // Use driveFiles instead of files
+                        tvTotalFiles.text = "${driveFiles.size}"
                         tvTotalSize.text = sizeFormatted
+                        swipeRefreshLayout.isRefreshing = false
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
                         if (e.message?.contains("401") == true || e.message?.contains("403") == true) {
-                            // Authentication error, need to re-authenticate
                             Toast.makeText(requireContext(), "Authentication expired. Please sign in again.", Toast.LENGTH_SHORT).show()
-                            // Optionally trigger re-authentication
                             triggerReauthentication()
                         } else {
                             Toast.makeText(requireContext(), "Failed to load Drive files: ${e.message}", Toast.LENGTH_SHORT).show()
                         }
+                        swipeRefreshLayout.isRefreshing = false
                     }
                 }
             }
         } else {
-            // No valid account or permissions
             Toast.makeText(requireContext(), "Please sign in to Google Drive to access files", Toast.LENGTH_SHORT).show()
+            swipeRefreshLayout.isRefreshing = false
         }
     }
 
@@ -523,11 +542,20 @@ class HomeFragment : Fragment() {
                         Log.d(TAG, "Start translate clicked")
                         startActivity(Intent(requireContext(), TranslationActivity::class.java))
                     }
+                    R.id.tv_view_files -> {
+                        Log.d(TAG, "View Files clicked")
+                        // Use Fragment transaction instead of startActivity
+                        val filesFragment = FilesFragment()
+                        parentFragmentManager.beginTransaction()
+                            .replace(R.id.fragment_container, filesFragment) // Use your container ID
+                            .addToBackStack("files")
+                            .commit()
+
+                    }
                 }
             }
         }
     }
-
     private fun setupScanner() {
         scanner = GmsDocumentScanning.getClient(
             GmsDocumentScannerOptions.Builder()
@@ -833,7 +861,7 @@ class HomeFragment : Fragment() {
         }
     }
 
-    private fun launchDocumentScanner() {
+    fun launchDocumentScanner() {
         scanner?.getStartScanIntent(requireActivity())
             ?.addOnSuccessListener { intentSender ->
                 scannerLauncher?.launch(IntentSenderRequest.Builder(intentSender).build())

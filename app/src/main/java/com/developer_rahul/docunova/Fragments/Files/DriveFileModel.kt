@@ -1,6 +1,6 @@
 package com.developer_rahul.docunova.Fragments.Files
 
-data class DriveFileModel2(
+data class DriveFileModel(
     val id: String,
     val name: String,
     val mimeType: String,

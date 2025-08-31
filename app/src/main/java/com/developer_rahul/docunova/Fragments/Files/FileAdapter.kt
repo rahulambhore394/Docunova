@@ -15,11 +15,11 @@ import java.util.*
 
 class FileAdapter(
     private val context: Context,
-    private var files: List<DriveFileModel2>,
+    private var files: List<DriveFileModel>,
     private var viewType: Int = VIEW_TYPE_LIST,
-    private val onDownloadClick: (DriveFileModel2) -> Unit,
-    private val onFileClick: (DriveFileModel2) -> Unit,
-    private val onMoreClick: (DriveFileModel2, View) -> Unit
+    private val onDownloadClick: (DriveFileModel) -> Unit,
+    private val onFileClick: (DriveFileModel) -> Unit,
+    private val onMoreClick: (DriveFileModel, View) -> Unit
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     companion object {
@@ -29,7 +29,7 @@ class FileAdapter(
         private const val TYPE_GRID = 1
     }
 
-    fun updateFiles(newFiles: List<DriveFileModel2>) {
+    fun updateFiles(newFiles: List<DriveFileModel>) {
         files = newFiles
         notifyDataSetChanged()
     }
@@ -67,16 +67,33 @@ class FileAdapter(
 
     inner class ListViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val fileName: TextView = itemView.findViewById(R.id.fileTitle2)
+        private val imageThumbnail: ImageView = itemView.findViewById(R.id.imageThumbnail2)
+        private val textType: TextView = itemView.findViewById(R.id.fileType2)
         private val fileMetaData: TextView = itemView.findViewById(R.id.fileMeta2)
         private val downloadButton: ImageView = itemView.findViewById(R.id.downloadBtn)
         private val moreButton: ImageView = itemView.findViewById(R.id.Btn_more)
+        private val iconMore: ImageView = itemView.findViewById(R.id.Btn_more)
 
-        fun bind(file: DriveFileModel2) {
+
+        fun bind(file: DriveFileModel) {
+            if (!file.thumbnailLink.isNullOrEmpty()) {
+                Glide.with(context)
+                    .load(file.thumbnailLink)
+                    .placeholder(R.drawable.app_icon)
+                    .into(imageThumbnail)
+            } else {
+                Glide.with(context)
+                    .load(R.drawable.app_icon)
+                    .into(imageThumbnail)
+            }
             fileName.text = file.name
+            val fileExtension = file.name.substringAfterLast('.', "").uppercase()
+            textType.text = if (fileExtension.isNotEmpty()) fileExtension else "FILE"
             fileMetaData.text = "${formatFileSize(file.size)} • ${formatDate(file.modifiedTime)}"
 
             downloadButton.setOnClickListener { onDownloadClick(file) }
             moreButton.setOnClickListener { onMoreClick(file, moreButton) }
+            iconMore.setOnClickListener { onMoreClick(file, iconMore) }
             itemView.setOnClickListener { onFileClick(file) }
         }
     }
@@ -90,7 +107,7 @@ class FileAdapter(
         private val textDownload: TextView = itemView.findViewById(R.id.textDownload)
         private val iconMore: ImageView = itemView.findViewById(R.id.iconMore)
 
-        fun bind(file: DriveFileModel2) {
+        fun bind(file: DriveFileModel) {
             // Set thumbnail - try to load from Drive if available, otherwise use placeholder
             if (!file.thumbnailLink.isNullOrEmpty()) {
                 Glide.with(context)

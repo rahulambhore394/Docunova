@@ -5,22 +5,28 @@ import android.content.res.Resources
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.text.Editable
+import android.text.TextWatcher
 import android.util.Log
 import android.view.*
+import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.widget.PopupMenu
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.developer_rahul.docunova.DriveServiceHelper
+import com.developer_rahul.docunova.Fragments.SharedViewModel
 import com.developer_rahul.docunova.R
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.Scope
 import com.google.android.material.appbar.MaterialToolbar
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.api.services.drive.DriveScopes
 import kotlinx.coroutines.Dispatchers
@@ -35,10 +41,13 @@ class FilesFragment : Fragment() {
     private lateinit var adapter: FileAdapter
     private lateinit var emptyStateView: View
     private lateinit var toolbar: MaterialToolbar
+    private lateinit var searchEditText: EditText
 
     private var currentViewType = FileAdapter.VIEW_TYPE_LIST
-    private var currentSortOption = SORT_NAME_ASC
-    private var filesList = mutableListOf<DriveFileModel2>()
+    private var currentSortOption = SORT_DATE_NEWEST // Default to newest first
+    private var filesList = mutableListOf<DriveFileModel>()
+    private var filteredFilesList = mutableListOf<DriveFileModel>()
+    private var searchQuery = ""
 
     companion object {
         private const val SORT_NAME_ASC = 0
@@ -65,12 +74,16 @@ class FilesFragment : Fragment() {
         swipeRefreshLayout = view.findViewById(R.id.swipeRefreshFiles)
         emptyStateView = view.findViewById(R.id.emptyStateView)
         toolbar = view.findViewById(R.id.toolbar)
+        searchEditText = view.findViewById(R.id.searchEditText)
 
         // Setup RecyclerView FIRST (before calling updateViewType)
         setupRecyclerView()
 
         // Setup toolbar
         setupToolbar()
+
+        // Setup search functionality
+        setupSearch()
 
         // Setup swipe refresh
         setupSwipeRefresh()
@@ -102,27 +115,62 @@ class FilesFragment : Fragment() {
         updateViewTypeIcons()
     }
 
+    private fun setupSearch() {
+        searchEditText.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                searchQuery = s.toString().trim()
+                filterFiles()
+            }
+        })
+    }
+
+    private fun filterFiles() {
+        if (searchQuery.isEmpty()) {
+            filteredFilesList.clear()
+            filteredFilesList.addAll(filesList)
+        } else {
+            filteredFilesList.clear()
+            filteredFilesList.addAll(filesList.filter { file ->
+                file.name.contains(searchQuery, ignoreCase = true)
+            })
+        }
+        sortFiles()
+    }
+
     private fun setupFAB() {
+        val sharedViewModel = ViewModelProvider(requireActivity()).get(SharedViewModel::class.java)
         val fabAdd = requireView().findViewById<FloatingActionButton>(R.id.fabAdd)
         fabAdd.setOnClickListener {
-            Toast.makeText(requireContext(), "Add new document", Toast.LENGTH_SHORT).show()
+            sharedViewModel.triggerScan()
         }
     }
 
+
     private fun showSortMenu() {
         // Find the sort menu item view properly
-        val sortMenuItemView = requireView().findViewById<View>(R.id.action_sort) ?: return
+        val actionView = toolbar.findViewById<View>(R.id.action_sort) ?: return
 
-        val popup = PopupMenu(requireContext(), sortMenuItemView)
+        val popup = PopupMenu(requireContext(), actionView)
         popup.menuInflater.inflate(R.menu.menu_sort, popup.menu)
 
+        // Add null safety checks for menu items
+        val sortNameAsc = popup.menu.findItem(R.id.sort_name_asc)
+        val sortNameDesc = popup.menu.findItem(R.id.sort_name_desc)
+        val sortDateNewest = popup.menu.findItem(R.id.sort_date_newest)
+        val sortDateOldest = popup.menu.findItem(R.id.sort_date_oldest)
+        val sortSizeLargest = popup.menu.findItem(R.id.sort_size_largest)
+        val sortSizeSmallest = popup.menu.findItem(R.id.sort_size_smallest)
+
+        // Only set checked if menu item is not null
         when (currentSortOption) {
-            SORT_NAME_ASC -> popup.menu.findItem(R.id.sort_name_asc).isChecked = true
-            SORT_NAME_DESC -> popup.menu.findItem(R.id.sort_name_desc).isChecked = true
-            SORT_DATE_NEWEST -> popup.menu.findItem(R.id.sort_date_newest).isChecked = true
-            SORT_DATE_OLDEST -> popup.menu.findItem(R.id.sort_date_oldest).isChecked = true
-            SORT_SIZE_LARGEST -> popup.menu.findItem(R.id.sort_size_largest).isChecked = true
-            SORT_SIZE_SMALLEST -> popup.menu.findItem(R.id.sort_size_smallest).isChecked = true
+            SORT_NAME_ASC -> sortNameAsc?.isChecked = true
+            SORT_NAME_DESC -> sortNameDesc?.isChecked = true
+            SORT_DATE_NEWEST -> sortDateNewest?.isChecked = true
+            SORT_DATE_OLDEST -> sortDateOldest?.isChecked = true
+            SORT_SIZE_LARGEST -> sortSizeLargest?.isChecked = true
+            SORT_SIZE_SMALLEST -> sortSizeSmallest?.isChecked = true
         }
 
         popup.setOnMenuItemClickListener { menuItem ->
@@ -176,17 +224,12 @@ class FilesFragment : Fragment() {
     }
 
     private fun updateViewType() {
-        // Update layout manager
         if (currentViewType == FileAdapter.VIEW_TYPE_LIST) {
             recyclerView.layoutManager = LinearLayoutManager(requireContext())
         } else {
             recyclerView.layoutManager = GridLayoutManager(requireContext(), 2)
         }
-
-        // Update toolbar icons
         updateViewTypeIcons()
-
-        // Update adapter view type (only if adapter is initialized)
         if (::adapter.isInitialized) {
             adapter.setViewType(currentViewType)
         }
@@ -214,7 +257,6 @@ class FilesFragment : Fragment() {
     }
 
     private fun setupRecyclerView() {
-        // Create adapter first
         adapter = FileAdapter(
             requireContext(),
             emptyList(),
@@ -229,11 +271,8 @@ class FilesFragment : Fragment() {
                 showFileOptionsMenu(file, anchorView)
             }
         )
-
-        // Set adapter
         recyclerView.adapter = adapter
 
-        // Now set the layout manager
         if (currentViewType == FileAdapter.VIEW_TYPE_LIST) {
             recyclerView.layoutManager = LinearLayoutManager(requireContext())
         } else {
@@ -241,7 +280,7 @@ class FilesFragment : Fragment() {
         }
     }
 
-    private fun showFileOptionsMenu(file: DriveFileModel2, anchorView: View) {
+    private fun showFileOptionsMenu(file: DriveFileModel, anchorView: View) {
         val popup = PopupMenu(requireContext(), anchorView)
         popup.menuInflater.inflate(R.menu.menu_file_options, popup.menu)
 
@@ -262,13 +301,11 @@ class FilesFragment : Fragment() {
                 else -> false
             }
         }
-
-        // Set force show icon to prevent multiple menu issues
         popup.setForceShowIcon(true)
         popup.show()
     }
 
-    private fun shareFile(file: DriveFileModel2) {
+    private fun shareFile(file: DriveFileModel) {
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(Intent.EXTRA_SUBJECT, file.name)
@@ -277,12 +314,90 @@ class FilesFragment : Fragment() {
         startActivity(Intent.createChooser(shareIntent, "Share file"))
     }
 
-    private fun renameFile(file: DriveFileModel2) {
-        Toast.makeText(requireContext(), "Rename functionality coming soon", Toast.LENGTH_SHORT).show()
+    private fun renameFile(file: DriveFileModel) {
+        val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_rename_file, null)
+        val editText = dialogView.findViewById<EditText>(R.id.renameInput)
+        editText.setText(file.name)
+
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("Rename File")
+            .setView(dialogView)
+            .setPositiveButton("Rename") { dialog, _ ->
+                val newName = editText.text.toString().trim()
+                if (newName.isNotEmpty() && newName != file.name) {
+                    performRenameFile(file, newName)
+                } else {
+                    Toast.makeText(requireContext(), "Please enter a valid name", Toast.LENGTH_SHORT).show()
+                }
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel") { dialog, _ ->
+                dialog.dismiss()
+            }
+            .show()
     }
 
-    private fun deleteFile(file: DriveFileModel2) {
-        Toast.makeText(requireContext(), "Delete functionality coming soon", Toast.LENGTH_SHORT).show()
+    private fun performRenameFile(file: DriveFileModel, newName: String) {
+        val account = GoogleSignIn.getLastSignedInAccount(requireContext()) ?: return
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val drive = DriveServiceHelper.buildService(requireContext(), account.email!!)
+
+                // Get file metadata
+                val fileMetadata = com.google.api.services.drive.model.File().apply {
+                    name = newName
+                }
+
+                // Update file name
+                drive.files().update(file.id, fileMetadata).execute()
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(requireContext(), "File renamed successfully", Toast.LENGTH_SHORT).show()
+                    loadDriveFiles() // Refresh the list
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(requireContext(), "Failed to rename file: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun deleteFile(file: DriveFileModel) {
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("Delete File")
+            .setMessage("Are you sure you want to delete '${file.name}'?")
+            .setPositiveButton("Delete") { dialog, _ ->
+                performDeleteFile(file)
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel") { dialog, _ ->
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    private fun performDeleteFile(file: DriveFileModel) {
+        val account = GoogleSignIn.getLastSignedInAccount(requireContext()) ?: return
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val drive = DriveServiceHelper.buildService(requireContext(), account.email!!)
+
+                // Delete file from Drive
+                drive.files().delete(file.id).execute()
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(requireContext(), "File deleted successfully", Toast.LENGTH_SHORT).show()
+                    loadDriveFiles() // Refresh the list
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(requireContext(), "Failed to delete file: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     private fun setupSwipeRefresh() {
@@ -301,51 +416,32 @@ class FilesFragment : Fragment() {
                     val drive = DriveServiceHelper.buildService(requireContext(), account.email!!)
                     val files = DriveServiceHelper.listFilesFromAppFolder(drive)
 
-                    // Convert to DriveFileModel2 - PROPERLY map all fields
                     val driveFiles = files.map { file ->
-                        DriveFileModel2(
+                        DriveFileModel(
                             id = file.id,
                             name = file.name,
                             mimeType = file.mimeType,
-                            size = file.size, // This should be Long in original DriveFileModel
-                            modifiedTime = file.modifiedTime, // This is the upload date
+                            size = file.size,
+                            modifiedTime = file.modifiedTime,
                             thumbnailLink = file.thumbnailLink,
                             webContentLink = file.webContentLink,
-                            createdTime = file.createdTime // If available in original
+                            createdTime = file.createdTime
                         )
                     }
 
                     filesList.clear()
                     filesList.addAll(driveFiles)
-
-                    // Sort on background thread but update UI on main thread
-                    val sortedList = when (currentSortOption) {
-                        SORT_NAME_ASC -> filesList.sortedBy { it.name.lowercase() }
-                        SORT_NAME_DESC -> filesList.sortedByDescending { it.name.lowercase() }
-                        SORT_DATE_NEWEST -> filesList.sortedByDescending { it.modifiedTime } // Use modifiedTime for sorting
-                        SORT_DATE_OLDEST -> filesList.sortedBy { it.modifiedTime }
-                        SORT_SIZE_LARGEST -> filesList.sortedByDescending { it.size }
-                        SORT_SIZE_SMALLEST -> filesList.sortedBy { it.size }
-                        else -> filesList
-                    }
+                    filterFiles() // Apply current search filter
 
                     withContext(Dispatchers.Main) {
-                        adapter.updateFiles(sortedList)
-                        updateEmptyState(driveFiles.isEmpty())
+                        updateEmptyState(filteredFilesList.isEmpty())
                         swipeRefreshLayout.isRefreshing = false
-
-                        // Debug: Check what data we're getting
-                        if (driveFiles.isNotEmpty()) {
-                            val firstFile = driveFiles.first()
-                            Log.d("FilesFragment", "First file: ${firstFile.name}, size: ${firstFile.size}, modified: ${firstFile.modifiedTime}")
-                        }
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
                         Toast.makeText(requireContext(), "Failed to load files: ${e.message}", Toast.LENGTH_SHORT).show()
                         swipeRefreshLayout.isRefreshing = false
                         updateEmptyState(true)
-                        Log.e("FilesFragment", "Error loading files", e)
                     }
                 }
             }
@@ -359,16 +455,19 @@ class FilesFragment : Fragment() {
     private fun sortFiles() {
         // Perform sorting on background thread but update UI on main thread
         lifecycleScope.launch(Dispatchers.Default) {
+            val listToSort = if (filteredFilesList.isNotEmpty()) filteredFilesList else filesList
+
             val sortedList = when (currentSortOption) {
-                SORT_NAME_ASC -> filesList.sortedBy { it.name.lowercase() }
-                SORT_NAME_DESC -> filesList.sortedByDescending { it.name.lowercase() }
-                SORT_DATE_NEWEST -> filesList.sortedByDescending { it.modifiedTime }
-                SORT_DATE_OLDEST -> filesList.sortedBy { it.modifiedTime }
-                SORT_SIZE_LARGEST -> filesList.sortedByDescending { it.size }
-                SORT_SIZE_SMALLEST -> filesList.sortedBy { it.size }
-                else -> filesList
+                SORT_NAME_ASC -> listToSort.sortedBy { it.name.lowercase() }
+                SORT_NAME_DESC -> listToSort.sortedByDescending { it.name.lowercase() }
+                SORT_DATE_NEWEST -> listToSort.sortedByDescending { it.modifiedTime }
+                SORT_DATE_OLDEST -> listToSort.sortedBy { it.modifiedTime }
+                SORT_SIZE_LARGEST -> listToSort.sortedByDescending { it.size }
+                SORT_SIZE_SMALLEST -> listToSort.sortedBy { it.size }
+                else -> listToSort
             }
 
+            // MOVE UI UPDATE TO MAIN THREAD
             withContext(Dispatchers.Main) {
                 adapter.updateFiles(sortedList)
             }
@@ -385,7 +484,7 @@ class FilesFragment : Fragment() {
         }
     }
 
-    private fun openDriveFile(file: DriveFileModel2) {
+    private fun openDriveFile(file: DriveFileModel) {
         val account = GoogleSignIn.getLastSignedInAccount(requireContext())
 
         if (account != null && GoogleSignIn.hasPermissions(account, Scope(DriveScopes.DRIVE_FILE))) {
@@ -419,7 +518,7 @@ class FilesFragment : Fragment() {
         }
     }
 
-    private fun openFileInBrowser(file: DriveFileModel2) {
+    private fun openFileInBrowser(file: DriveFileModel) {
         val url = "https://drive.google.com/file/d/${file.id}/view"
         try {
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))

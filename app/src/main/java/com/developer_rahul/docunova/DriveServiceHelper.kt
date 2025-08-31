@@ -2,7 +2,7 @@ package com.developer_rahul.docunova
 
 import android.content.Context
 import android.net.Uri
-import com.developer_rahul.docunova.Fragments.Home.DriveFileModel
+import com.developer_rahul.docunova.Fragments.Files.DriveFileModel
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
 import com.google.api.client.http.InputStreamContent
 import com.google.api.services.drive.Drive
@@ -86,7 +86,30 @@ object DriveServiceHelper {
             )
         }
     }
+// In DriveServiceHelper.kt
 
+    /** Rename a file */
+    suspend fun renameFile(drive: Drive, fileId: String, newName: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val fileMetadata = File().apply {
+                name = newName
+            }
+            drive.files().update(fileId, fileMetadata).execute()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** Delete a file */
+    suspend fun deleteFile(drive: Drive, fileId: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            drive.files().delete(fileId).execute()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
     fun downloadFile(driveService: Drive, fileId: String, outputFile: java.io.File) {
         FileOutputStream(outputFile).use { outputStream: FileOutputStream ->
             driveService.files().get(fileId).executeMediaAndDownloadTo(outputStream)
