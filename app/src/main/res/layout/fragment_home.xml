@@ -299,7 +299,9 @@
                         </androidx.cardview.widget.CardView>
                     </LinearLayout>
 
-
+<!--                    <include-->
+<!--                        android:id="@+id/shimmerInclude"-->
+<!--                        layout="@layout/shimmer_layout"/>-->
                     <!-- Second Row -->
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -318,8 +320,10 @@
                             android:layout_weight="1"
                             card_view:cardCornerRadius="24dp"
                             card_view:cardElevation="6dp"
+                            android:id="@+id/cardDocuments"
                             card_view:cardPreventCornerOverlap="false"
-                            android:backgroundTint="#F4F8FB">
+                            android:backgroundTint="#F4F8FB"
+                            >
 
                             <LinearLayout
                                 android:layout_width="match_parent"
@@ -366,10 +370,12 @@
                             android:layout_height="100dp"
                             android:layout_margin="8dp"
                             android:layout_weight="1"
+                            android:id="@+id/cardStorage"
                             card_view:cardCornerRadius="24dp"
                             card_view:cardElevation="6dp"
                             card_view:cardPreventCornerOverlap="false"
-                            android:backgroundTint="#F4F8FB">
+                            android:backgroundTint="#F4F8FB"
+                            >
 
                             <LinearLayout
                                 android:layout_width="match_parent"
@@ -452,6 +458,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
                 card_view:itemCount="5"
+
             android:paddingHorizontal="16dp"
             />
 

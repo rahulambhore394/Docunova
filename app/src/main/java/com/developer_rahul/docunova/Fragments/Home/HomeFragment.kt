@@ -39,6 +39,7 @@ import com.developer_rahul.docunova.RoomDB.AppDatabase
 import com.developer_rahul.docunova.RoomDB.RecentFile
 import com.developer_rahul.docunova.GoogleDriveClient
 import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.Scope
@@ -119,15 +120,23 @@ class HomeFragment : Fragment() {
         fetchUserDetails()
 
         loadDriveFiles()
-        driveAdapter = DriveFileAdapter(requireContext(), emptyList()) { file ->
-            downloadFileFromDrive(file.id, file.name)
-        }
+        driveAdapter = DriveFileAdapter(
+            requireContext(),
+            emptyList(),
+            onDownloadClick = { file ->
+                downloadFileFromDrive(file.id, file.name)
+            },
+            onFileClick = { file ->
+                openDriveFile(file)
+            }
+        )
         recyclerView.adapter = driveAdapter
 
         fetchUserDocumentsFromSupabase()
 
         setupSwipeRefresh()
 
+        // Register Drive sign-in result handler
         // Register Drive sign-in result handler
         googleDriveSignInLauncher = registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
@@ -141,16 +150,32 @@ class HomeFragment : Fragment() {
                     if (uri != null && name != null) {
                         lifecycleScope.launch(Dispatchers.IO) {
                             try {
-                                val drive = DriveServiceHelper.buildService(requireContext(),
-                                    account.toString()
+                                // FIX: Use account.email instead of account.toString()
+                                val drive = DriveServiceHelper.buildService(
+                                    requireContext(),
+                                    account.email!!
                                 )
-                                val id = GoogleDriveClient.uploadUri(drive, requireContext(), uri, "$name.pdf")
+                                val id = DriveServiceHelper.uploadFileToAppFolder(
+                                    drive,
+                                    requireContext(),
+                                    uri,
+                                    "$name.pdf"
+                                )
                                 withContext(Dispatchers.Main) {
-                                    Toast.makeText(requireContext(), "Uploaded to Drive (id: $id)", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(
+                                        requireContext(),
+                                        "Uploaded to Drive (id: $id)",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    loadDriveFiles() // Refresh the file list after upload
                                 }
                             } catch (e: Exception) {
                                 withContext(Dispatchers.Main) {
-                                    Toast.makeText(requireContext(), "Drive upload failed: ${e.message}", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(
+                                        requireContext(),
+                                        "Drive upload failed: ${e.message}",
+                                        Toast.LENGTH_LONG
+                                    ).show()
                                 }
                             } finally {
                                 pendingPdfUri = null
@@ -160,7 +185,11 @@ class HomeFragment : Fragment() {
                     }
                 }
             } catch (e: ApiException) {
-                Toast.makeText(requireContext(), "Google Sign-In cancelled/failed", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    requireContext(),
+                    "Google Sign-In cancelled/failed",
+                    Toast.LENGTH_SHORT
+                ).show()
                 pendingPdfUri = null
                 pendingDriveFileName = null
             }
@@ -175,6 +204,196 @@ class HomeFragment : Fragment() {
                 fetchUserDocumentsFromSupabase()
                 swipeRefreshLayout.isRefreshing = false
             }
+        }
+    }
+
+    private fun openDriveFile(file: DriveFileModel) {
+        val account = GoogleSignIn.getLastSignedInAccount(requireContext())
+
+        if (account != null && GoogleSignIn.hasPermissions(account, Scope(DriveScopes.DRIVE_FILE))) {
+            // ✅ Always use the Drive app if installed
+            if (isGoogleDriveAppInstalled()) {
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        data = Uri.parse("https://drive.google.com/file/d/${file.id}/view")
+                        setPackage("com.google.android.apps.docs") // Force Drive app
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    Toast.makeText(requireContext(), "Failed to open in Drive app", Toast.LENGTH_SHORT).show()
+                    openFileInBrowser(file)
+                }
+            } else {
+                openFileInBrowser(file)
+            }
+        } else {
+            // ✅ Try silent sign-in first
+            GoogleSignIn.getClient(requireContext(), driveGso)
+                .silentSignIn()
+                .addOnCompleteListener { task ->
+                    if (task.isSuccessful) {
+                        // Retry after silent sign-in
+                        openDriveFile(file)
+                    } else {
+                        Toast.makeText(requireContext(), "Please sign in to access Drive", Toast.LENGTH_SHORT).show()
+                    }
+                }
+        }
+    }
+
+    private fun openFileInBrowser(file: DriveFileModel) {
+        val url = "https://drive.google.com/file/d/${file.id}/view"
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(requireContext(), "Cannot open file", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun isGoogleDriveAppInstalled(): Boolean {
+        return try {
+            requireContext().packageManager.getPackageInfo("com.google.android.apps.docs", 0)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+
+
+    private fun openFileWithDriveApi(file: DriveFileModel, account: GoogleSignInAccount) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val drive = DriveServiceHelper.buildService(requireContext(), account.email!!)
+
+                // Get the file metadata to get the proper webViewLink
+                val driveFile = drive.files().get(file.id)
+                    .setFields("webViewLink, webContentLink")
+                    .execute()
+
+                val webViewLink = driveFile.webViewLink
+
+                withContext(Dispatchers.Main) {
+                    // Try to open with Google Drive app using proper intent
+                    try {
+                        // Method 1: Try to open with Google Drive app using content:// URI
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            // Use content:// URI instead of https://
+                            data = Uri.parse("content://com.google.android.apps.drive.DRIVE_OPEN_FILE/${file.id}")
+                            setPackage("com.google.android.apps.docs")
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+
+                        if (intent.resolveActivity(requireContext().packageManager) != null) {
+                            startActivity(intent)
+                        } else {
+                            // Method 2: Fallback to web browser with authenticated link
+                            openAuthenticatedFileInBrowser(webViewLink)
+                        }
+                    } catch (e: Exception) {
+                        // Method 3: Final fallback to regular browser
+                        openFileInBrowser(file)
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(requireContext(), "Failed to open file: ${e.message}", Toast.LENGTH_SHORT).show()
+                    openFileInBrowser(file) // Fallback to browser
+                }
+            }
+        }
+    }
+
+    private fun openAuthenticatedFileInBrowser(webViewLink: String) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                data = Uri.parse(webViewLink)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(requireContext(), "Failed to open file in browser", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+
+    private fun openFileWithSignedInAccount(file: DriveFileModel, account: GoogleSignInAccount) {
+        try {
+            // Build the Drive URL with proper authentication
+            val driveUrl = "https://drive.google.com/file/d/${file.id}/view"
+
+            // Try to open in Google Drive app first
+            val driveIntent = Intent(Intent.ACTION_VIEW).apply {
+                data = Uri.parse(driveUrl)
+                setPackage("com.google.android.apps.docs")
+                // Add flags to maintain the user session
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+
+            // Check if Drive app can handle this intent
+            val packageManager = requireContext().packageManager
+            if (driveIntent.resolveActivity(packageManager) != null) {
+                startActivity(driveIntent)
+            } else {
+                // Fallback: Open in browser with authenticated session
+                openFileInBrowser(file)
+            }
+        } catch (e: Exception) {
+            Toast.makeText(requireContext(), "Failed to open file: ${e.message}", Toast.LENGTH_SHORT).show()
+            openFileInBrowser(file) // Fallback to browser
+        }
+    }
+
+    private fun trySilentSignIn() {
+        val account = GoogleSignIn.getLastSignedInAccount(requireContext())
+        if (account != null) {
+            // Already signed in, load files
+            loadDriveFiles()
+        } else {
+            // Try silent sign-in
+            GoogleSignIn.getClient(requireContext(), driveGso)
+                .silentSignIn()
+                .addOnCompleteListener { task ->
+                    if (task.isSuccessful) {
+                        // Silent sign-in succeeded, load files
+                        loadDriveFiles()
+                    } else {
+                        // Silent sign-in failed, need explicit sign-in
+                        Toast.makeText(requireContext(), "Please sign in to access Google Drive", Toast.LENGTH_SHORT).show()
+                    }
+                }
+        }
+    }
+
+
+    private fun showDriveAppInstallDialog(file: DriveFileModel) {
+        AlertDialog.Builder(requireContext())
+            .setTitle("Google Drive App Required")
+            .setMessage("For the best experience, we recommend opening files in the Google Drive app. Would you like to install it?")
+            .setPositiveButton("Install") { _, _ ->
+                openPlayStoreForDriveApp()
+            }
+            .setNegativeButton("Open in Browser") { _, _ ->
+                openFileInBrowser(file)
+            }
+            .setNeutralButton("Cancel", null)
+            .show()
+    }
+
+    private fun openPlayStoreForDriveApp() {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                data = Uri.parse("market://details?id=com.google.android.apps.docs")
+                setPackage("com.android.vending") // Google Play Store package
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                data = Uri.parse("https://play.google.com/store/apps/details?id=com.google.android.apps.docs")
+            }
+            startActivity(intent)
         }
     }
 
@@ -207,7 +426,6 @@ class HomeFragment : Fragment() {
                         }
                     }
 
-
                     val sizeFormatted = formatFileSize(totalSize)
                     withContext(Dispatchers.Main) {
                         driveAdapter.updateFiles(files)
@@ -216,10 +434,27 @@ class HomeFragment : Fragment() {
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(requireContext(), "Failed to load Drive files", Toast.LENGTH_SHORT).show()
+                        if (e.message?.contains("401") == true || e.message?.contains("403") == true) {
+                            // Authentication error, need to re-authenticate
+                            Toast.makeText(requireContext(), "Authentication expired. Please sign in again.", Toast.LENGTH_SHORT).show()
+                            // Optionally trigger re-authentication
+                            triggerReauthentication()
+                        } else {
+                            Toast.makeText(requireContext(), "Failed to load Drive files: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             }
+        } else {
+            // No valid account or permissions
+            Toast.makeText(requireContext(), "Please sign in to Google Drive to access files", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun triggerReauthentication() {
+        // Sign out and prompt for re-authentication
+        GoogleSignIn.getClient(requireContext(), driveGso).signOut().addOnCompleteListener {
+            googleDriveSignInLauncher.launch(driveSignInClient.signInIntent)
         }
     }
 
@@ -235,10 +470,7 @@ class HomeFragment : Fragment() {
         return String.format("%.2f %s", newSize, units[unitIndex])
     }
 
-
-
-
-private fun downloadFileFromDrive(fileId: String, fileName: String) {
+    private fun downloadFileFromDrive(fileId: String, fileName: String) {
         val account = GoogleSignIn.getLastSignedInAccount(requireContext()) ?: return
         lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -264,8 +496,10 @@ private fun downloadFileFromDrive(fileId: String, fileName: String) {
         }
     }
 
-
-
+    private fun checkDriveAuthentication(): Boolean {
+        val account = GoogleSignIn.getLastSignedInAccount(requireContext())
+        return account != null && GoogleSignIn.hasPermissions(account, Scope(DriveScopes.DRIVE_FILE))
+    }
 
     private fun setupOptionButtons(view: View) {
         val options = listOf(
@@ -293,8 +527,6 @@ private fun downloadFileFromDrive(fileId: String, fileName: String) {
             }
         }
     }
-
-
 
     private fun setupScanner() {
         scanner = GmsDocumentScanning.getClient(
@@ -364,10 +596,6 @@ private fun downloadFileFromDrive(fileId: String, fileName: String) {
                 // === GOOGLE DRIVE UPLOAD ===
                 ensureDriveAccountThenUpload(pdfUri, fileName)
 
-                // === (OPTIONAL) SUPABASE UPLOAD ===
-                // If you want to keep Supabase storage too, uncomment:
-                // uploadToSupabaseStorage(pdfUri, fileName, thumbnailUri)
-
                 dialog.dismiss()
             }
         }
@@ -375,14 +603,16 @@ private fun downloadFileFromDrive(fileId: String, fileName: String) {
     }
 
     /** Ensures user has Google account with Drive scope, then uploads the file */
+    /** Ensures user has Google account with Drive scope, then uploads the file */
     private fun ensureDriveAccountThenUpload(pdfUri: Uri, fileName: String) {
         pendingPdfUri = pdfUri
         pendingDriveFileName = fileName
 
         val last = GoogleSignIn.getLastSignedInAccount(requireContext())
         val hasDrive = last != null && GoogleSignIn.hasPermissions(last, Scope(DriveScopes.DRIVE_FILE))
+
         if (hasDrive) {
-            // ✅ Upload directly using last.email instead of account
+            // ✅ Upload directly using the signed-in account
             lifecycleScope.launch(Dispatchers.IO) {
                 try {
                     val drive = DriveServiceHelper.buildService(requireContext(), last!!.email!!)
@@ -391,7 +621,6 @@ private fun downloadFileFromDrive(fileId: String, fileName: String) {
                         Toast.makeText(requireContext(), "Uploaded to Drive", Toast.LENGTH_SHORT).show()
                         loadDriveFiles() // refresh list
                     }
-
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
                         Toast.makeText(requireContext(), "Drive upload failed: ${e.message}", Toast.LENGTH_LONG).show()
@@ -406,7 +635,6 @@ private fun downloadFileFromDrive(fileId: String, fileName: String) {
             googleDriveSignInLauncher.launch(driveSignInClient.signInIntent)
         }
     }
-
 
     private fun setupRecyclerView() {
         recyclerView = requireView().findViewById<RecyclerView>(R.id.recentFilesRecycler).apply {

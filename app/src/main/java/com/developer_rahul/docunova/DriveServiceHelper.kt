@@ -70,15 +70,19 @@ object DriveServiceHelper {
         val query = "'$folderId' in parents and trashed=false"
         val result = drive.files().list()
             .setQ(query)
-            .setFields("files(id, name, mimeType, size, thumbnailLink, createdTime)")
+            .setFields("files(id, name, mimeType, size, thumbnailLink, webContentLink, createdTime, modifiedTime)") // Added modifiedTime
             .execute()
+
         result.files.map {
             DriveFileModel(
                 id = it.id,
                 name = it.name,
                 mimeType = it.mimeType,
-                size = it.size ?: 0,
-                thumbnailLink = it.thumbnailLink ?: ""
+                size = (it.size ?: 0).toLong(),
+                modifiedTime = it.modifiedTime?.value ?: 0,
+                thumbnailLink = it.thumbnailLink,
+                webContentLink = it.webContentLink,
+                createdTime = it.createdTime?.value // Added createdTime
             )
         }
     }
@@ -86,9 +90,6 @@ object DriveServiceHelper {
     fun downloadFile(driveService: Drive, fileId: String, outputFile: java.io.File) {
         FileOutputStream(outputFile).use { outputStream: FileOutputStream ->
             driveService.files().get(fileId).executeMediaAndDownloadTo(outputStream)
-
         }
     }
-
-
 }

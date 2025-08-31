@@ -126,7 +126,7 @@ dependencies {
     implementation("com.google.apis:google-api-services-drive:v3-rev20230815-2.0.0")
     implementation("com.google.guava:guava:31.1-android")
     implementation ("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
-
+    implementation ("com.facebook.shimmer:shimmer:0.5.0")
 }
 
 configurations.all {
